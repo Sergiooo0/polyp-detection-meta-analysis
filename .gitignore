@@ -1,0 +1,24 @@
+# --- .gitignore ---
+
+# Data
+datasets/
+data/
+*.jpg
+*.png
+
+# Model weights 
+*.pt
+*.pth
+*.onnx
+
+# Dir with MLflow experiments
+runs/        
+
+# Environments and caches
+venv/
+.env/
+__pycache__/
+*.pyc
+
+# Local settings for IDEs
+.vscode/
