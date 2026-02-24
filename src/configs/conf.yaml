@@ -1,0 +1,11 @@
+#Base Settings
+defaults:
+  - _self_
+  - files: polyp
+Params:
+  model: model/v5/polyp-yolo5.yaml
+  epochs: 300
+  batch_size: 16
+  img_size: 640
+  optimizer: AdamW
+  lr: 0.01

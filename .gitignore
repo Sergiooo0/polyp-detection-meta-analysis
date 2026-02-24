@@ -22,3 +22,6 @@ __pycache__/
 
 # Local settings for IDEs
 .vscode/
+
+# output logs
+outputs/
