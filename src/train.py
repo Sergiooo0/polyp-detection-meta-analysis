@@ -1,4 +1,3 @@
-from models.registry import register_custom_modules
 from ultralytics import YOLO
 import numpy as np
 import torch
@@ -15,8 +14,8 @@ cs.store(name="polyp_detection_config", node=PolypDetectionConfig)
 
 @hydra.main(version_base=None, config_path="configs", config_name="conf.yaml")
 def main(cfg: PolypDetectionConfig):
-    print(cfg)
-    register_custom_modules()
+    print(cfg.params)
+    print(cfg.files)
 
 # Reset settings to default values
 #settings.reset()

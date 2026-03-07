@@ -2,10 +2,15 @@
 defaults:
   - _self_
   - files: polyp
-Params:
+params:
+  seed: 42
+  val_ratio: 0.2
   model: model/v5/polyp-yolo5.yaml
+  img_size: 640
   epochs: 300
   batch_size: 16
-  img_size: 640
-  optimizer: AdamW
   lr: 0.01
+  weight_decay: 0.0005
+  optimizer: AdamW
+  
+  
