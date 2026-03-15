@@ -1,10 +1,30 @@
-from dataclasses import dataclass
-from typing import Dict, Optional
+from dataclasses import dataclass, field
+from typing import Dict, Optional, List
 
 @dataclass
 class RawDataset:
-    images_dir: str
-    mask_dir: str
+    """
+    Configuration for a single raw dataset.
+    
+    Supported types:
+      - 'mask': Flat directory with binary masks (e.g. CVC-ClinicDB, CVC-ColonDB).
+                Requires: images_dir, mask_dir. Optional: metadata_file.
+      - 'sun_annotation': SUN-style dataset with per-case folders and annotation txt files.
+                Requires: positive_dir, negative_dir, annotation_dir.
+                Optional: metadata_file.
+    """
+    type: str # "mask" or "sun_annotation"
+    
+    # --- Fields for type="mask" ---
+    images_dir: Optional[str] = None
+    mask_dir: Optional[str] = None
+    
+    # --- Fields for type="sun_annotation" ---
+    positive_dir: Optional[str] = None
+    negative_dir: Optional[str] = None
+    annotation_dir: Optional[str] = None
+    
+    # --- Common fields ---
     metadata_file: Optional[str] = None
 
 @dataclass

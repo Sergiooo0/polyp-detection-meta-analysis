@@ -1,11 +1,14 @@
 import cv2
 import numpy as np
 import os
+import glob
+from tqdm import tqdm
 
 def masks_to_yolo(input_dir, output_dir, class_id=0):
     """
     Transform a dir of masks into YOLO bounding box format.
     Assumes all objects belong to the same class (default 0, e.g., polyp).
+    Works with flat-directory mask datasets (CVC-ClinicDB, CVC-ColonDB).
     """
     # Create output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
@@ -48,6 +51,180 @@ def masks_to_yolo(input_dir, output_dir, class_id=0):
                     f.write(f"{class_id} {x_center:.6f} {y_center:.6f} {norm_w:.6f} {norm_h:.6f}\n")
                     
     print(f"Saved YOLO files to: {output_dir}\n")
+
+
+def sun_annotations_to_yolo(annotation_dir, positive_dir, output_images_dir, output_labels_dir, class_id=0):
+    """
+    Convert SUN-style annotations (per-case txt files with x_min,y_min,x_max,y_max,class)
+    into YOLO bounding box format.
+    
+    Also copies the positive images into a single flat directory so downstream code
+    can treat them the same way as CVC datasets.
+    
+    Args:
+        annotation_dir: Path to sundatabase_positive/annotation_txt/ with caseX.txt files
+        positive_dir:   Path to sundatabase_positive/ containing caseX/ image folders
+        output_images_dir: Path where all images will be copied (flat)
+        output_labels_dir: Path where YOLO .txt labels will be saved (flat)
+        class_id: YOLO class id (default 0 for polyp)
+    
+    Returns:
+        dict mapping case_id (int) -> list of image filenames belonging to that case
+    """
+    os.makedirs(output_images_dir, exist_ok=True)
+    os.makedirs(output_labels_dir, exist_ok=True)
+    
+    case_to_files = {}
+    total_images = 0
+    total_bboxes = 0
+    
+    # Find all annotation txt files
+    annotation_files = sorted(glob.glob(os.path.join(annotation_dir, "case*.txt")))
+    
+    if not annotation_files:
+        raise FileNotFoundError(f"No annotation files found in {annotation_dir}")
+    
+    for ann_file in tqdm(annotation_files, desc="Processing sun annotations"):
+        # Extract case ID from filename (e.g., "case1.txt" -> 1)
+        case_name = os.path.splitext(os.path.basename(ann_file))[0]  # "case1"
+        case_id = int(case_name.replace("case", ""))
+        case_image_dir = os.path.join(positive_dir, case_name)
+        
+        if not os.path.isdir(case_image_dir):
+            print(f"Warning: Image folder missing for {case_name}: {case_image_dir}")
+            continue
+        
+        case_files = []
+        
+        with open(ann_file, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # Format: "filename x_min,y_min,x_max,y_max,class_id"
+                parts = line.split(' ')
+                if len(parts) < 2:
+                    print(f"Warning: Malformed annotation line in {case_name}: {line}")
+                    continue
+                
+                img_filename = parts[0]
+                bbox_str = parts[1]
+                
+                # Parse bbox: x_min,y_min,x_max,y_max,class_id
+                bbox_parts = bbox_str.split(',')
+                if len(bbox_parts) < 4:
+                    print(f"Warning: Malformed bbox in {case_name}: {bbox_str}")
+                    continue
+                
+                x_min = int(bbox_parts[0])
+                y_min = int(bbox_parts[1])
+                x_max = int(bbox_parts[2])
+                y_max = int(bbox_parts[3])
+                
+                # Read image to get dimensions
+                src_img_path = os.path.join(case_image_dir, img_filename)
+                if not os.path.exists(src_img_path):
+                    print(f"Warning: Image not found: {src_img_path}")
+                    continue
+                
+                img = cv2.imread(src_img_path)
+                if img is None:
+                    print(f"Warning: Could not read image: {src_img_path}")
+                    continue
+                
+                img_height, img_width = img.shape[:2]
+                
+                # Convert to YOLO normalized format
+                w = x_max - x_min
+                h = y_max - y_min
+                x_center = (x_min + w / 2.0) / img_width
+                y_center = (y_min + h / 2.0) / img_height
+                norm_w = w / img_width
+                norm_h = h / img_height
+                
+                # Clamp values to [0, 1]
+                x_center = max(0.0, min(1.0, x_center))
+                y_center = max(0.0, min(1.0, y_center))
+                norm_w = max(0.0, min(1.0, norm_w))
+                norm_h = max(0.0, min(1.0, norm_h))
+                
+                # Copy image to flat output directory
+                dst_img_path = os.path.join(output_images_dir, img_filename)
+                if not os.path.exists(dst_img_path):
+                    cv2.imwrite(dst_img_path, img)
+                
+                # Write YOLO label (append in case future datasets have multiple bboxes per image)
+                txt_filename = os.path.splitext(img_filename)[0] + ".txt"
+                txt_path = os.path.join(output_labels_dir, txt_filename)
+                with open(txt_path, 'a') as lf:
+                    lf.write(f"{class_id} {x_center:.6f} {y_center:.6f} {norm_w:.6f} {norm_h:.6f}\n")
+                
+                case_files.append(img_filename)
+                total_images += 1
+                total_bboxes += 1
+        
+        case_to_files[case_id] = case_files
+    
+    print(f"Processed {len(case_to_files)} cases, {total_images} images, {total_bboxes} bboxes")
+    print(f"Saved images to: {output_images_dir}")
+    print(f"Saved YOLO labels to: {output_labels_dir}\n")
+    
+    return case_to_files
+
+
+def sun_copy_negative_images(negative_dir, output_images_dir, output_labels_dir):
+    """
+    Copy SUN negative (no-polyp) images to the flat output directories.
+    Creates empty YOLO label files for each image (background/healthy frames).
+    
+    Args:
+        negative_dir: Path to sundatabase_negative/ containing caseX/ folders
+        output_images_dir: Path where images will be copied (flat)
+        output_labels_dir: Path where empty YOLO .txt labels will be created
+    
+    Returns:
+        dict mapping case_name (str like "neg_case1") -> list of image filenames
+    """
+    os.makedirs(output_images_dir, exist_ok=True)
+    os.makedirs(output_labels_dir, exist_ok=True)
+    
+    valid_ext = ('.png', '.jpg', '.jpeg', '.tif', '.tiff')
+    neg_case_to_files = {}
+    total = 0
+    
+    for entry in tqdm(sorted(os.listdir(negative_dir)), desc="Processing negative images"):
+        case_dir = os.path.join(negative_dir, entry)
+        if not os.path.isdir(case_dir) or not entry.startswith("case"):
+            continue
+        
+        case_files = []
+        for img_file in os.listdir(case_dir):
+            if not img_file.lower().endswith(valid_ext):
+                continue
+            
+            src_path = os.path.join(case_dir, img_file)
+            dst_img_path = os.path.join(output_images_dir, img_file)
+            txt_filename = os.path.splitext(img_file)[0] + ".txt"
+            dst_txt_path = os.path.join(output_labels_dir, txt_filename)
+            
+            if not os.path.exists(dst_img_path):
+                import shutil
+                shutil.copy2(src_path, dst_img_path)
+            
+            # Create empty label file (no polyp)
+            if not os.path.exists(dst_txt_path):
+                open(dst_txt_path, 'w').close()
+            
+            case_files.append(img_file)
+            total += 1
+        
+        neg_case_to_files[f"neg_{entry}"] = case_files
+    
+    print(f"Copied {total} negative images from {len(neg_case_to_files)} cases")
+    print(f"Saved to: {output_images_dir}\n")
+    
+    return neg_case_to_files
 
 def check_yolo_bboxes(images_dir, labels_dir, output_dir, num_images=5):
     """
