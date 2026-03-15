@@ -1,5 +1,5 @@
-from dataclasses import dataclass, field
-from typing import Dict, Optional, List
+from dataclasses import dataclass
+from typing import Dict, Optional
 
 @dataclass
 class RawDataset:
@@ -37,7 +37,13 @@ class ProtocolConfig:
 @dataclass
 class Params:
     # Parameters for the training model process
+    protocol: str
     seed : int
+    val_ratio: float
+    # Diff threshold for considering two consecutive frames as near-duplicates (0.0 to 1.0, representing percentage of pixel difference).
+    duplicate_threshold: float
+    # Force regeneration of cached intermediate artifacts (e.g., SUN flat images/labels).
+    force_rebuild_cache: bool
     model: str
     img_size: int
     epochs: int

@@ -3,8 +3,13 @@ defaults:
   - _self_
   - files: polyp
 params:
+  protocol: t1
   seed: 42
   val_ratio: 0.2
+  # Diff threshold for considering two consecutive frames as near-duplicates (0.0 to 1.0, representing percentage of pixel difference).
+  duplicate_threshold: 0.05
+  # If true, regenerates cached intermediates (e.g., SUN flat images/labels) even if they already exist.
+  force_rebuild_cache: false
   model: model/v5/polyp-yolo5.yaml
   img_size: 640
   epochs: 300

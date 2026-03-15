@@ -2,9 +2,71 @@ import os
 import pandas as pd
 import shutil
 import random
+import cv2
+import numpy as np
+from typing import Optional
 from tqdm import tqdm
 
-def copy_yolo_files(src_images_dir: str, src_labels_dir: str, dst_images_dir: str, dst_labels_dir: str, file_list: list = None):
+
+def _deduplicate_consecutive_frames(
+    file_list: list,
+    images_dir: str,
+    threshold: float = 0.02,
+):
+    """
+    Detect near-duplicate frames only against the previous frame in the same ordered list.
+
+    Args:
+        file_list: Ordered list of image filenames for a sequence/case.
+        images_dir: Directory containing the images.
+        threshold: Threshold for determining near-duplicates.
+        phash_threshold: Hamming distance threshold for pHash near-duplicate detection.
+        rng: random.Random instance for reproducible subsampling of redundant frames.
+
+    Returns:
+        (filtered_files, stats_dict)
+    """
+
+    if threshold == 0.0:
+        return file_list, {
+            "total": len(file_list),
+            "redundant_detected": 0,
+            "failed_reads": 0,
+        }
+
+    filtered_files = []
+
+    prev_frame = None
+
+    for i, filename in enumerate(file_list):
+        img_path = os.path.join(images_dir, filename)
+        frame = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+
+        if frame is None:
+            continue
+
+        # Resize for faster processing and to reduce noise sensitivity
+        frame = cv2.resize(frame, (160, 160)).astype(np.float32) 
+        
+        if prev_frame is None:
+            filtered_files.append(filename)
+            prev_frame = frame
+            continue
+
+        diff = np.mean(np.abs(frame - prev_frame)) / 255.0 
+
+        if diff > threshold:
+            # Not a near-duplicate, keep it
+            filtered_files.append(filename)
+            prev_frame = frame
+
+    total = len(file_list)
+    return filtered_files, {
+        "total": total,
+        "redundant_detected": total - len(filtered_files),
+    }
+
+def copy_yolo_files(src_images_dir: str, src_labels_dir: str, dst_images_dir: str, dst_labels_dir: str, file_list: Optional[list] = None):
     """
     Helper function to safely copy images and labels to a new directory.
     If a label doesn't exist, it creates an empty one (background image).
@@ -41,7 +103,15 @@ def copy_yolo_files(src_images_dir: str, src_labels_dir: str, dst_images_dir: st
                 open(dst_txt, 'a').close()
 
 
-def split_dataset_by_sequence(csv_path, images_dir, labels_dir, output_dir, train_ratio=0.8, seed=42):
+def split_dataset_by_sequence(
+    csv_path,
+    images_dir,
+    labels_dir,
+    output_dir,
+    train_ratio=0.8,
+    seed=42,
+    duplicate_threshold=0.02,
+):
     """
     Divide a dataset in Train and Val ensuring that frames from the same
     sequence (video) are not mixed between the two sets.
@@ -50,7 +120,7 @@ def split_dataset_by_sequence(csv_path, images_dir, labels_dir, output_dir, trai
     df = pd.read_csv(csv_path)
     
     # Get unique sequence IDs from the metadata CSV
-    sequences = df['sequence_id'].unique()
+    sequences = list(df['sequence_id'].unique())
 
     # Shuffle sequences randomly (using seed for reproducibility)
     random.seed(seed)
@@ -70,13 +140,35 @@ def split_dataset_by_sequence(csv_path, images_dir, labels_dir, output_dir, trai
     train_files = []
     val_files = []
 
+    # Build ordered filenames per sequence (preserve CSV order)
+    seq_to_files = {}
     for _, row in df.iterrows():
         current_seq = row['sequence_id']
         img_filename = os.path.basename(row['png_image_path'])
-        if current_seq in train_seqs:
-            train_files.append(img_filename)
+        if current_seq not in seq_to_files:
+            seq_to_files[current_seq] = []
+        seq_to_files[current_seq].append(img_filename)
+
+    dedup_stats = dict()
+    for seq_id, seq_files in seq_to_files.items():
+        filtered_seq_files, stats = _deduplicate_consecutive_frames(
+            seq_files,
+            images_dir=images_dir,
+            threshold=duplicate_threshold,
+        )
+        for key in stats:
+            dedup_stats[key] = dedup_stats.get(key, 0) + stats[key]
+        if seq_id in train_seqs:
+            train_files.extend(filtered_seq_files)
         else:
-            val_files.append(img_filename)
+            val_files.extend(filtered_seq_files)
+
+    if duplicate_threshold > 0.0:
+        print(
+            "Consecutive-frame dedup stats (sequence-level): "
+            f"total={dedup_stats['total']}, "
+            f"redundant_detected={dedup_stats['redundant_detected']}, "
+        )
 
     print(f"Total files — Train: {len(train_files)}, Val: {len(val_files)}")
     print("Copying files to Train folder...")
@@ -99,7 +191,8 @@ def split_dataset_by_sequence(csv_path, images_dir, labels_dir, output_dir, trai
 
 
 def split_sun_dataset_by_case(case_to_files, images_dir, labels_dir, output_dir,
-                              neg_case_to_files=None, train_ratio=0.8, seed=42):
+                              neg_case_to_files=None, train_ratio=0.8, seed=42,
+                              duplicate_threshold=0.02):
     """
     Divide a SUN-style dataset into Train and Val ensuring frames from the same
     case are not mixed between the two sets.
@@ -127,17 +220,25 @@ def split_sun_dataset_by_case(case_to_files, images_dir, labels_dir, output_dir,
 
     train_files = []
     val_files = []
-    for cid in case_ids:
+    dedup_stats = dict()
+
+    for cid in tqdm(case_ids, desc="Deleting duplicate cases"):
         files = case_to_files[cid]
+        filtered_files, stats = _deduplicate_consecutive_frames(
+            files,
+            images_dir=images_dir,
+            threshold=duplicate_threshold,
+        )
+        for key in stats:
+            dedup_stats[key] = dedup_stats.get(key, 0) + stats[key]
         if cid in train_cases:
-            train_files.extend(files)
+            train_files.extend(filtered_files)
         else:
-            val_files.extend(files)
+            val_files.extend(filtered_files)
 
     # --- Split negative cases (if provided) ---
     if neg_case_to_files:
         neg_case_names = sorted(neg_case_to_files.keys())
-        random.seed(seed + 1)  # different seed to avoid correlation
         random.shuffle(neg_case_names)
 
         neg_split_idx = int(len(neg_case_names) * train_ratio)
@@ -146,12 +247,27 @@ def split_sun_dataset_by_case(case_to_files, images_dir, labels_dir, output_dir,
 
         print(f"Negative cases — Total: {len(neg_case_names)}, Train: {len(neg_train)}, Val: {len(neg_val)}")
 
-        for nc in neg_case_names:
+        for nc in tqdm(neg_case_names, desc="Deleting duplicate negative cases"):
             files = neg_case_to_files[nc]
+            filtered_files, stats = _deduplicate_consecutive_frames(
+                files,
+                images_dir=images_dir,
+                threshold=duplicate_threshold,
+            )
+            for key in stats:
+                dedup_stats[key] = dedup_stats.get(key, 0) + stats[key]
+
             if nc in neg_train:
-                train_files.extend(files)
+                train_files.extend(filtered_files)
             else:
-                val_files.extend(files)
+                val_files.extend(filtered_files)
+
+    if duplicate_threshold > 0.0:
+        print(
+            "Consecutive-frame dedup stats (case-level): "
+            f"total={dedup_stats['total']}, "
+            f"redundant_detected={dedup_stats['redundant_detected']}, "
+        )
 
     print(f"Total files — Train: {len(train_files)}, Val: {len(val_files)}")
 

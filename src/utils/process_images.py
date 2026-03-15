@@ -1,7 +1,7 @@
 import cv2
-import numpy as np
 import os
 import glob
+import shutil
 from tqdm import tqdm
 
 def masks_to_yolo(input_dir, output_dir, class_id=0):
@@ -95,6 +95,9 @@ def sun_annotations_to_yolo(annotation_dir, positive_dir, output_images_dir, out
             continue
         
         case_files = []
+        case_seen_files = set()
+        labels_by_image = {}
+        image_size_cache = {}
         
         with open(ann_file, 'r') as f:
             for line in f:
@@ -122,18 +125,25 @@ def sun_annotations_to_yolo(annotation_dir, positive_dir, output_images_dir, out
                 x_max = int(bbox_parts[2])
                 y_max = int(bbox_parts[3])
                 
-                # Read image to get dimensions
                 src_img_path = os.path.join(case_image_dir, img_filename)
                 if not os.path.exists(src_img_path):
                     print(f"Warning: Image not found: {src_img_path}")
                     continue
-                
-                img = cv2.imread(src_img_path)
-                if img is None:
-                    print(f"Warning: Could not read image: {src_img_path}")
-                    continue
-                
-                img_height, img_width = img.shape[:2]
+
+                # Read image only to get dimensions (grayscale is cheaper than color)
+                if img_filename not in image_size_cache:
+                    img = cv2.imread(src_img_path, cv2.IMREAD_GRAYSCALE)
+                    if img is None:
+                        print(f"Warning: Could not read image: {src_img_path}")
+                        continue
+                    image_size_cache[img_filename] = img.shape[:2]
+
+                    # Copy image to flat output directory without re-encoding
+                    dst_img_path = os.path.join(output_images_dir, img_filename)
+                    if not os.path.exists(dst_img_path):
+                        shutil.copy2(src_img_path, dst_img_path)
+
+                img_height, img_width = image_size_cache[img_filename]
                 
                 # Convert to YOLO normalized format
                 w = x_max - x_min
@@ -149,20 +159,26 @@ def sun_annotations_to_yolo(annotation_dir, positive_dir, output_images_dir, out
                 norm_w = max(0.0, min(1.0, norm_w))
                 norm_h = max(0.0, min(1.0, norm_h))
                 
-                # Copy image to flat output directory
-                dst_img_path = os.path.join(output_images_dir, img_filename)
-                if not os.path.exists(dst_img_path):
-                    cv2.imwrite(dst_img_path, img)
-                
-                # Write YOLO label (append in case future datasets have multiple bboxes per image)
-                txt_filename = os.path.splitext(img_filename)[0] + ".txt"
-                txt_path = os.path.join(output_labels_dir, txt_filename)
-                with open(txt_path, 'a') as lf:
-                    lf.write(f"{class_id} {x_center:.6f} {y_center:.6f} {norm_w:.6f} {norm_h:.6f}\n")
-                
-                case_files.append(img_filename)
-                total_images += 1
+
+                # Accumulate YOLO lines per image and write once at end of case
+                if img_filename not in labels_by_image:
+                    labels_by_image[img_filename] = []
+                labels_by_image[img_filename].append(
+                    f"{class_id} {x_center:.6f} {y_center:.6f} {norm_w:.6f} {norm_h:.6f}\n"
+                )
+
+                if img_filename not in case_seen_files:
+                    case_seen_files.add(img_filename)
+                    case_files.append(img_filename)
+                    total_images += 1
                 total_bboxes += 1
+
+        # Write labels once per image (overwrite to avoid accumulation on reruns)
+        for img_filename, yolo_lines in labels_by_image.items():
+            txt_filename = os.path.splitext(img_filename)[0] + ".txt"
+            txt_path = os.path.join(output_labels_dir, txt_filename)
+            with open(txt_path, 'w') as lf:
+                lf.writelines(yolo_lines)
         
         case_to_files[case_id] = case_files
     
@@ -209,7 +225,6 @@ def sun_copy_negative_images(negative_dir, output_images_dir, output_labels_dir)
             dst_txt_path = os.path.join(output_labels_dir, txt_filename)
             
             if not os.path.exists(dst_img_path):
-                import shutil
                 shutil.copy2(src_path, dst_img_path)
             
             # Create empty label file (no polyp)

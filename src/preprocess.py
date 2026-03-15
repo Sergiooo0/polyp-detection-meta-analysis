@@ -3,7 +3,6 @@ from hydra.core.config_store import ConfigStore
 from config import PolypDetectionConfig
 from utils.process_images import masks_to_yolo, check_yolo_bboxes, sun_annotations_to_yolo, sun_copy_negative_images
 from utils.split_dataset import split_dataset_by_sequence, split_sun_dataset_by_case, copy_yolo_files
-from omegaconf import OmegaConf
 import os
 import shutil
 
@@ -89,11 +88,26 @@ def process_sun_dataset(dataset_name, dataset_info, base_path):
     return images_dir, labels_dir, case_to_files, neg_case_to_files
 
 
+def create_data_yaml(output_dir):
+    yaml_path = os.path.join(output_dir, "data.yaml")
+    yaml_content = (
+        "train: images/train\n"
+        "val: images/val\n"
+        "test: images/test\n"
+        "\n"
+        "nc: 1\n"
+        "names: ['polyp']\n"
+    )
+    with open(yaml_path, "w") as yaml_file:
+        yaml_file.write(yaml_content)
+    print(f"Created YOLO config file: {yaml_path}\n")
+
 @hydra.main(version_base=None, config_path="configs", config_name="conf.yaml")
 def main(cfg: PolypDetectionConfig):
 
     seed = cfg.params.seed
     val_ratio = cfg.params.val_ratio
+    duplicate_threshold = cfg.params.duplicate_threshold
     base_path = cfg.files.base_path
     
     # We will track temp directories to delete them later
@@ -181,7 +195,8 @@ def main(cfg: PolypDetectionConfig):
                     train_info["labels_dir"],
                     yolo_out,
                     train_ratio=1 - val_ratio,
-                    seed=seed
+                    seed=seed,
+                    duplicate_threshold=duplicate_threshold
                 )
 
             elif train_info["type"] == "sun_annotation":
@@ -194,7 +209,8 @@ def main(cfg: PolypDetectionConfig):
                     output_dir=yolo_out,
                     neg_case_to_files=train_info.get("neg_case_to_files"),
                     train_ratio=1 - val_ratio,
-                    seed=seed
+                    seed=seed,
+                    duplicate_threshold=duplicate_threshold
                 )
 
             # --- Build OOD test set ---
@@ -209,6 +225,10 @@ def main(cfg: PolypDetectionConfig):
                 ood_images_dst,
                 ood_labels_dst
             )
+
+            #Create YOLO config file
+
+            create_data_yaml(yolo_out)
             print()
 
         except Exception as e:
