@@ -47,6 +47,7 @@ class Params:
     model: str
     pretrained_weights: str
     img_size: int
+    experiment_name: str
     epochs: int
     batch_size: int
     lr: float

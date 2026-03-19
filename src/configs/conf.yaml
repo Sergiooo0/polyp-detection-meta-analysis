@@ -16,6 +16,7 @@ params:
   pretrained_weights: yolov5su.pt
   img_size: 640
   epochs: 300
+  experiment_name: Polyp_Detection
   batch_size: 128
   lr: 0.01
   weight_decay: 0.0005

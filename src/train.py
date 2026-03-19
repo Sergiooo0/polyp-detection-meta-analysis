@@ -2,15 +2,12 @@ from datetime import datetime
 from ultralytics import YOLO
 import os
 import shutil
-import numpy as np
-import torch
 from ultralytics import settings
 import hydra
 import mlflow
 from hydra.core.config_store import ConfigStore
 from hydra.core.hydra_config import HydraConfig
 from config import PolypDetectionConfig
-import ultralytics.utils.metrics as metrics
 
 # Update a setting
 settings.update({"mlflow": True})
@@ -29,9 +26,9 @@ def main(cfg: PolypDetectionConfig):
     os.environ["MLFLOW_TRACKING_URI"] = f"sqlite:///{mlflow_db_path}"
 
     #Group all runs under the same experiment name for better organization in MLflow UI
-    experiment_name = "Polyp_Detection"
+    experiment_name = cfg.params.experiment_name
     os.environ["MLFLOW_EXPERIMENT_NAME"] = experiment_name
-    mlflow.set_experiment("Polyp_Detection")
+    mlflow.set_experiment(experiment_name)
 
     protocol_config = cfg.files.protocols[cfg.params.protocol]
     print(f"Using protocol: {cfg.params.protocol} - {protocol_config.description}")
@@ -51,8 +48,7 @@ def main(cfg: PolypDetectionConfig):
         model_name = os.path.splitext(os.path.basename(model_cfg))[0]
     elif pretained_weights:
         print(f"Using default model config with pretrained weights: {pretained_weights}")
-        model = YOLO('yolov8n.yaml')
-        model.load(pretained_weights)
+        model = YOLO(pretained_weights)
         model_name = os.path.splitext(os.path.basename(pretained_weights))[0]
     else:
         raise ValueError("At least one of 'model' or 'pretrained_weights' must be specified in the configuration.")
@@ -95,6 +91,19 @@ def main(cfg: PolypDetectionConfig):
 
     if os.path.exists(weights_dir):
         shutil.rmtree(weights_dir)
+
+    # mean Average Precision at IoU=0.5 (mAP50)
+    metrics = model.val()
+    map50 = metrics.box.map50
+    print(f"mAP50: {map50}")
+
+    mlflow.end_run()
+    
+    if "MLFLOW_RUN_ID" in os.environ:
+        del os.environ["MLFLOW_RUN_ID"]
+
+    return map50
+
 
 if __name__ == "__main__":
     main()
