@@ -1,3 +1,4 @@
 hydra-core
 mlflow
 ultralytics
+hydra-optuna-sweeper optuna

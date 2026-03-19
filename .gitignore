@@ -13,7 +13,10 @@ data/
 *.onnx
 
 # Dir with MLflow experiments
-runs/        
+mlruns/
+
+# db files
+*.db
 
 # Environments and caches
 venv/

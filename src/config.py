@@ -45,12 +45,14 @@ class Params:
     # Force regeneration of cached intermediate artifacts (e.g., SUN flat images/labels).
     force_rebuild_cache: bool
     model: str
+    pretrained_weights: str
     img_size: int
     epochs: int
     batch_size: int
     lr: float
     weight_decay: float
     optimizer: str
+    device: list[int]
 
 @dataclass
 class Files:

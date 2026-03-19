@@ -10,12 +10,16 @@ params:
   duplicate_threshold: 0.05
   # If true, regenerates cached intermediates (e.g., SUN flat images/labels) even if they already exist.
   force_rebuild_cache: false
-  model: model/v5/polyp-yolo5.yaml
+  # Route to the custom model YOLO yaml file or the name of a ultralystics model yaml.
+  #model: models/yolov5TST.yaml
+  model: null
+  pretrained_weights: yolov5su.pt
   img_size: 640
   epochs: 300
-  batch_size: 16
+  batch_size: 128
   lr: 0.01
   weight_decay: 0.0005
   optimizer: AdamW
+  device: [0, 1]
   
   
