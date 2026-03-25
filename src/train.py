@@ -8,6 +8,7 @@ import mlflow
 from hydra.core.config_store import ConfigStore
 from hydra.core.hydra_config import HydraConfig
 from config import PolypDetectionConfig
+from data.sampler import create_balanced_train_split
 
 # Update a setting
 settings.update({"mlflow": True})
@@ -32,7 +33,27 @@ def main(cfg: PolypDetectionConfig):
 
     protocol_config = cfg.files.protocols[cfg.params.protocol]
     print(f"Using protocol: {cfg.params.protocol} - {protocol_config.description}")
-    data_yaml_path = os.path.join(cfg.files.base_path, protocol_config.yolo_output_dir, "data.yaml")
+    original_data_yaml_path = os.path.join(cfg.files.base_path, protocol_config.yolo_output_dir, "data.yaml")
+
+    # Verify if the dataset need a balance between negatives and positives examples
+    balanced_txt_path = None
+    # This is the case of protocol t2 with the SUN dataset, which has 2 negatives examples per positive example
+    if cfg.params.protocol == "t2":
+        print(f"Applying deterministic negative sampling for protocol {cfg.params.protocol} (Seed: {cfg.params.seed}).")
+        
+        # Save new files in Hydra output file, don't modify the dataset
+        balanced_yaml_path = os.path.join(hydra_output_dir, f"data_balanced_seed_{cfg.params.seed}.yaml")
+        balanced_txt_path = os.path.join(hydra_output_dir, f"train_balanced_seed_{cfg.params.seed}.txt")
+        
+        data_yaml_path = create_balanced_train_split(
+            data_yaml_path=original_data_yaml_path,
+            output_yaml_path=balanced_yaml_path,
+            output_txt_path=balanced_txt_path, 
+            r=1.0, 
+            seed=cfg.params.seed 
+        )
+    else:
+        data_yaml_path = original_data_yaml_path
 
     model_cfg = cfg.params.model
     pretained_weights = cfg.params.pretrained_weights
@@ -64,11 +85,9 @@ def main(cfg: PolypDetectionConfig):
     # Save Hydra parameters path as a MLflow artifact for reference
     mlflow.log_artifact(os.path.join(hydra_output_dir, ".hydra/config.yaml"), artifact_path="hydra_config")
 
-    # Add tags to filter runs by protocol and model in MLflow UI
-    mlflow.set_tags({
-        "protocol": cfg.params.protocol,
-        "model": model_name
-    })
+    if balanced_txt_path:
+        mlflow.log_artifact(data_yaml_path, artifact_path="dataset_splits")
+        mlflow.log_artifact(balanced_txt_path, artifact_path="dataset_splits")
 
     results = model.train(
         data=data_yaml_path,
@@ -97,8 +116,16 @@ def main(cfg: PolypDetectionConfig):
     map50 = metrics.box.map50
     print(f"mAP50: {map50}")
 
+    # Add tags to filter runs by protocol and model in MLflow UI
+    mlflow.set_tags({
+        "protocol": cfg.params.protocol,
+        "model": model_name,
+        "mAP50": map50
+    })
+
     mlflow.end_run()
     
+    # Clean up the MLflow run ID environment variable to avoid confusion in subsequent runs
     if "MLFLOW_RUN_ID" in os.environ:
         del os.environ["MLFLOW_RUN_ID"]
 

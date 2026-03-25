@@ -2,10 +2,21 @@ import os
 import random
 import yaml
 
-def create_balanced_train_split(data_yaml_path, output_yaml_path, r=1.0, seed=42):
+def create_balanced_train_split(data_yaml_path, output_yaml_path, output_txt_path, r=1.0, seed=42):
     """
-    Lee el data.yaml original, balancea los negativos/positivos del set de train,
-    y crea un nuevo .yaml y un .txt para el entrenamiento de YOLO.
+    Read the original data.yaml, balance the negatives/positives in the training set, 
+    and create a new .yaml and .txt for YOLO training.
+
+    data.yaml in YOLO dataset typically has a structure like:
+    train: path/to/train/images
+    val: path/to/val/images
+    test: path/to/test/images
+
+    But could be modified to point to a .txt file instead
+    The txt file should contain lines like:
+    path/to/image1.jpg
+    path/to/image2.jpg
+    ... and so on.
     """
     with open(data_yaml_path, 'r') as f:
         data_cfg = yaml.safe_load(f)
@@ -54,14 +65,13 @@ def create_balanced_train_split(data_yaml_path, output_yaml_path, r=1.0, seed=42
     # Save all together in a new .txt file for training
     balanced_train_list = positives + sampled_negatives
     
-    train_txt_path = os.path.join(base_dir, "train_balanced.txt")
-    with open(train_txt_path, 'w') as f:
+    with open(output_txt_path, 'w') as f:
         for item in balanced_train_list:
             f.write("%s\n" % item)
 
     # Create a new YAML file pointing to the .txt file instead of the folder
     new_data_cfg = data_cfg.copy()
-    new_data_cfg['train'] = train_txt_path
+    new_data_cfg['train'] = output_txt_path
     
     with open(output_yaml_path, 'w') as f:
         yaml.dump(new_data_cfg, f)
