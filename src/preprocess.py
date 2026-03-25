@@ -1,8 +1,8 @@
 import hydra
 from hydra.core.config_store import ConfigStore
 from config import PolypDetectionConfig
-from utils.process_images import masks_to_yolo, check_yolo_bboxes, sun_annotations_to_yolo, sun_copy_negative_images
-from utils.split_dataset import split_dataset_by_sequence, split_sun_dataset_by_case, copy_yolo_files
+from data.process_images import masks_to_yolo, check_yolo_bboxes, sun_annotations_to_yolo, sun_copy_negative_images
+from data.split_dataset import split_dataset_by_sequence, split_sun_dataset_by_case, copy_yolo_files
 import os
 import shutil
 
