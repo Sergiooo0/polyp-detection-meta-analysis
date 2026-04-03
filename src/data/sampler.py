@@ -67,12 +67,18 @@ def create_balanced_train_split(data_yaml_path, output_yaml_path, output_txt_pat
     
     with open(output_txt_path, 'w') as f:
         for item in balanced_train_list:
-            f.write("%s\n" % item)
+            f.write(f"{item}\n")
 
     # Create a new YAML file pointing to the .txt file instead of the folder
     new_data_cfg = data_cfg.copy()
     new_data_cfg['train'] = output_txt_path
-    
+
+    # Convert relative paths to absolute paths for val and test to ensure they work
+    for key in ['val', 'test']:
+        path = new_data_cfg[key]
+        if not os.path.isabs(path):
+            new_data_cfg[key] = os.path.join(base_dir, path)
+
     with open(output_yaml_path, 'w') as f:
         yaml.dump(new_data_cfg, f)
         

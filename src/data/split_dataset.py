@@ -20,7 +20,6 @@ def _deduplicate_consecutive_frames(
         file_list: Ordered list of image filenames for a sequence/case.
         images_dir: Directory containing the images.
         threshold: Threshold for determining near-duplicates.
-        phash_threshold: Hamming distance threshold for pHash near-duplicate detection.
         rng: random.Random instance for reproducible subsampling of redundant frames.
 
     Returns:
