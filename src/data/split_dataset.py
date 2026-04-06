@@ -8,282 +8,279 @@ from typing import Optional
 from tqdm import tqdm
 
 
-def _deduplicate_consecutive_frames(
-    file_list: list,
-    images_dir: str,
-    threshold: float = 0.02,
-):
+def _deduplicate_consecutive_frames(file_list: list, images_dir: str, threshold: float = 0.02):
     """
-    Detect near-duplicate frames only against the previous frame in the same ordered list.
-
-    Args:
-        file_list: Ordered list of image filenames for a sequence/case.
-        images_dir: Directory containing the images.
-        threshold: Threshold for determining near-duplicates.
-        rng: random.Random instance for reproducible subsampling of redundant frames.
+    Remove near-duplicate consecutive frames from an ordered list.
 
     Returns:
         (filtered_files, stats_dict)
     """
+    if threshold == 0.0 or len(file_list) == 0:
+        return file_list, {"total": len(file_list), "removed": 0}
 
-    if threshold == 0.0:
-        return file_list, {
-            "total": len(file_list),
-            "redundant_detected": 0,
-            "failed_reads": 0,
-        }
-
-    filtered_files = []
-
+    filtered = []
     prev_frame = None
 
-    for i, filename in enumerate(file_list):
+    for filename in file_list:
         img_path = os.path.join(images_dir, filename)
         frame = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
 
         if frame is None:
             continue
 
-        # Resize for faster processing and to reduce noise sensitivity
-        frame = cv2.resize(frame, (160, 160)).astype(np.float32) 
-        
+        frame = cv2.resize(frame, (160, 160)).astype(np.float32)
+
         if prev_frame is None:
-            filtered_files.append(filename)
+            filtered.append(filename)
             prev_frame = frame
             continue
 
-        diff = np.mean(np.abs(frame - prev_frame)) / 255.0 
+        diff = np.mean(np.abs(frame - prev_frame)) / 255.0
 
         if diff > threshold:
-            # Not a near-duplicate, keep it
-            filtered_files.append(filename)
+            filtered.append(filename)
             prev_frame = frame
 
-    total = len(file_list)
-    return filtered_files, {
-        "total": total,
-        "redundant_detected": total - len(filtered_files),
-    }
+    return filtered, {"total": len(file_list), "removed": len(file_list) - len(filtered)}
 
-def copy_yolo_files(src_images_dir: str, src_labels_dir: str, dst_images_dir: str, dst_labels_dir: str, file_list: Optional[list] = None):
+
+def copy_yolo_files(
+    src_images_dir: str,
+    src_labels_dir: str,
+    dst_images_dir: str,
+    dst_labels_dir: str,
+    file_list: Optional[list] = None,
+):
     """
-    Helper function to safely copy images and labels to a new directory.
-    If a label doesn't exist, it creates an empty one (background image).
-    If file_list is provided, it only processes those specific files.
+    Copy images and labels to a new directory.
+    Creates empty label files for images without labels (background images).
     """
     os.makedirs(dst_images_dir, exist_ok=True)
     os.makedirs(dst_labels_dir, exist_ok=True)
-    
-    valid_ext = ('.png', '.jpg', '.jpeg', '.tif', '.tiff')
-    
-    # Use the provided list, or fall back to reading the entire directory
+
+    valid_ext = (".png", ".jpg", ".jpeg", ".tif", ".tiff")
     files_to_process = file_list if file_list is not None else os.listdir(src_images_dir)
-    
-    for img_file in tqdm(files_to_process, desc="Copying YOLO files"):
-        if img_file.lower().endswith(valid_ext):
-            base_name = os.path.splitext(img_file)[0]
-            src_img = os.path.join(src_images_dir, img_file)
-            src_txt = os.path.join(src_labels_dir, base_name + '.txt')
-            dst_img = os.path.join(dst_images_dir, img_file)
-            dst_txt = os.path.join(dst_labels_dir, base_name + '.txt')
 
-            # Copy image
-            if os.path.exists(src_img):
-                shutil.copy(src_img, dst_img)
-            else:
-                print(f"Warning: Missing source image {src_img}")
-                continue
+    for img_file in tqdm(files_to_process, desc="Copying files"):
+        if not img_file.lower().endswith(valid_ext):
+            continue
 
-            # Copy or create label
-            if os.path.exists(src_txt):
-                shutil.copy(src_txt, dst_txt)
-            else:
-                # If no bbox file exists, create an empty one (healthy image)
-                open(dst_txt, 'a').close()
+        base_name = os.path.splitext(img_file)[0]
+        src_img = os.path.join(src_images_dir, img_file)
+        src_txt = os.path.join(src_labels_dir, base_name + ".txt")
+        dst_img = os.path.join(dst_images_dir, img_file)
+        dst_txt = os.path.join(dst_labels_dir, base_name + ".txt")
+
+        if not os.path.exists(src_img):
+            continue
+
+        shutil.copy(src_img, dst_img)
+
+        if os.path.exists(src_txt):
+            shutil.copy(src_txt, dst_txt)
+        else:
+            open(dst_txt, "a").close()
+
+
+def split_by_groups(
+    group_to_files: dict,
+    images_dir: str,
+    labels_dir: str,
+    output_dir: str,
+    train_ratio: float = 0.8,
+    seed: int = 42,
+    duplicate_threshold: float = 0.02,
+    group_label: str = "group",
+):
+    """
+    Split a dataset into train/val ensuring frames from the same group stay together.
+
+    This is the core split function. It:
+    1. Deduplicates all groups first
+    2. Assigns groups to train/val based on FRAME count (not group count)
+    3. Copies files to the output directory
+
+    Args:
+        group_to_files: dict mapping group_id -> list of image filenames
+        images_dir: Directory containing all images
+        labels_dir: Directory containing all YOLO labels
+        output_dir: Root output directory (will create images/train, images/val, etc.)
+        train_ratio: Target ratio of frames for training (default 0.8)
+        seed: Random seed for reproducibility
+        duplicate_threshold: Threshold for deduplication (0.0 to disable)
+        group_label: Label for logging (e.g., "sequence", "case")
+
+    Returns:
+        dict with split statistics
+    """
+    if not group_to_files:
+        print(f"Warning: No {group_label}s provided, skipping split")
+        return {}
+
+    # Deduplicate all groups
+    print(f"Deduplicating {len(group_to_files)} {group_label}s...")
+    deduped = {}
+    total_original = 0
+    total_removed = 0
+
+    for gid in tqdm(sorted(group_to_files.keys()), desc=f"Deduplicating {group_label}s"):
+        files = group_to_files[gid]
+        filtered, stats = _deduplicate_consecutive_frames(files, images_dir, duplicate_threshold)
+        deduped[gid] = filtered
+        total_original += stats["total"]
+        total_removed += stats["removed"]
+
+    if duplicate_threshold > 0.0:
+        print(f"Deduplication: {total_original} -> {total_original - total_removed} "
+              f"(removed {total_removed}, {100*total_removed/total_original:.1f}%)")
+
+    # Calculate frame counts and assign groups
+    frame_counts = {gid: len(files) for gid, files in deduped.items()}
+    total_frames = sum(frame_counts.values())
+    target_train = int(total_frames * train_ratio)
+
+    # Shuffle groups for random assignment
+    group_ids = list(deduped.keys())
+    random.seed(seed)
+    random.shuffle(group_ids)
+
+    # Greedily assign groups to train until target is reached
+    train_groups = set()
+    train_frames = 0
+
+    for gid in group_ids:
+        if train_frames < target_train:
+            train_groups.add(gid)
+            train_frames += frame_counts[gid]
+
+    val_groups = set(group_ids) - train_groups
+    val_frames = total_frames - train_frames
+
+    print(f"Split: {len(train_groups)} train {group_label}s ({train_frames} frames, "
+          f"{100*train_frames/max(1,total_frames):.1f}%), "
+          f"{len(val_groups)} val {group_label}s ({val_frames} frames, "
+          f"{100*val_frames/max(1,total_frames):.1f}%)")
+
+    # Collect files for each split
+    train_files = []
+    val_files = []
+
+    for gid, files in deduped.items():
+        if gid in train_groups:
+            train_files.extend(files)
+        else:
+            val_files.extend(files)
+
+    # Copy files
+    print("Copying train files...")
+    copy_yolo_files(
+        images_dir, labels_dir,
+        os.path.join(output_dir, "images", "train"),
+        os.path.join(output_dir, "labels", "train"),
+        train_files,
+    )
+
+    print("Copying val files...")
+    copy_yolo_files(
+        images_dir, labels_dir,
+        os.path.join(output_dir, "images", "val"),
+        os.path.join(output_dir, "labels", "val"),
+        val_files,
+    )
+
+    return {
+        "train_groups": len(train_groups),
+        "val_groups": len(val_groups),
+        "train_frames": len(train_files),
+        "val_frames": len(val_files),
+    }
 
 
 def split_dataset_by_sequence(
-    csv_path,
-    images_dir,
-    labels_dir,
-    output_dir,
-    train_ratio=0.8,
-    seed=42,
-    duplicate_threshold=0.02,
+    csv_path: str,
+    images_dir: str,
+    labels_dir: str,
+    output_dir: str,
+    train_ratio: float = 0.8,
+    seed: int = 42,
+    duplicate_threshold: float = 0.02,
 ):
     """
-    Divide a dataset in Train and Val ensuring that frames from the same
-    sequence (video) are not mixed between the two sets.
-    Uses metadata CSV with 'sequence_id' and 'png_image_path' columns.
-    """
-    df = pd.read_csv(csv_path)
-    
-    # Get unique sequence IDs from the metadata CSV
-    sequences = list(df['sequence_id'].unique())
-
-    # Shuffle sequences randomly (using seed for reproducibility)
-    random.seed(seed)
-    random.shuffle(sequences)
-    
-    # Split sequences into Train and Val based on the specified ratio
-    split_idx = int(len(sequences) * train_ratio)
-    
-    train_seqs = set(sequences[:split_idx])
-    val_seqs = set(sequences[split_idx:])
-
-    print(f"Total sequences: {len(sequences)}")
-    print(f"Assigned to Train: {len(train_seqs)} sequences")
-    print(f"Assigned to Val: {len(val_seqs)} sequences")
-
-    # Group filenames into Train and Val lists
-    train_files = []
-    val_files = []
-
-    # Build ordered filenames per sequence (preserve CSV order)
-    seq_to_files = {}
-    for _, row in df.iterrows():
-        current_seq = row['sequence_id']
-        img_filename = os.path.basename(row['png_image_path'])
-        if current_seq not in seq_to_files:
-            seq_to_files[current_seq] = []
-        seq_to_files[current_seq].append(img_filename)
-
-    dedup_stats = dict()
-    for seq_id, seq_files in seq_to_files.items():
-        filtered_seq_files, stats = _deduplicate_consecutive_frames(
-            seq_files,
-            images_dir=images_dir,
-            threshold=duplicate_threshold,
-        )
-        for key in stats:
-            dedup_stats[key] = dedup_stats.get(key, 0) + stats[key]
-        if seq_id in train_seqs:
-            train_files.extend(filtered_seq_files)
-        else:
-            val_files.extend(filtered_seq_files)
-
-    if duplicate_threshold > 0.0:
-        print(
-            "Consecutive-frame dedup stats (sequence-level): "
-            f"total={dedup_stats['total']}, "
-            f"redundant_detected={dedup_stats['redundant_detected']}, "
-        )
-
-    print(f"Total files — Train: {len(train_files)}, Val: {len(val_files)}")
-    print("Copying files to Train folder...")
-    copy_yolo_files(
-        src_images_dir=images_dir,
-        src_labels_dir=labels_dir,
-        dst_images_dir=os.path.join(output_dir, 'images', 'train'),
-        dst_labels_dir=os.path.join(output_dir, 'labels', 'train'),
-        file_list=train_files
-    )
-
-    print("Copying files to Val folder...")
-    copy_yolo_files(
-        src_images_dir=images_dir,
-        src_labels_dir=labels_dir,
-        dst_images_dir=os.path.join(output_dir, 'images', 'val'),
-        dst_labels_dir=os.path.join(output_dir, 'labels', 'val'),
-        file_list=val_files
-    )
-
-
-def split_sun_dataset_by_case(case_to_files, images_dir, labels_dir, output_dir,
-                              neg_case_to_files=None, train_ratio=0.8, seed=42,
-                              duplicate_threshold=0.02):
-    """
-    Divide a SUN-style dataset into Train and Val ensuring frames from the same
-    case are not mixed between the two sets.
+    Split a dataset using a metadata CSV with sequence information.
+    Ensures frames from the same video sequence stay together.
 
     Args:
-        case_to_files:     dict mapping case_id (int) -> list of image filenames (positive cases)
-        images_dir:        Flat directory where all images were collected
-        labels_dir:        Flat directory where all YOLO labels were collected
-        output_dir:        Root of the YOLO experiment (e.g. .../YOLO_Experiments/T2)
-        neg_case_to_files: dict mapping neg_case_name -> list of image filenames (negative/healthy).
-                           If provided, negative cases are also split by case.
-        train_ratio:       Fraction of cases used for training (default 0.8)
-        seed:              Random seed for reproducibility
+        csv_path: Path to CSV with 'sequence_id' and 'png_image_path' columns
+        images_dir: Directory containing all images
+        labels_dir: Directory containing all YOLO labels
+        output_dir: Root output directory
+        train_ratio: Target ratio of frames for training
+        seed: Random seed
+        duplicate_threshold: Deduplication threshold
     """
-    # --- Split positive cases ---
-    case_ids = sorted(case_to_files.keys())
-    random.seed(seed)
-    random.shuffle(case_ids)
+    df = pd.read_csv(csv_path)
 
-    split_idx = int(len(case_ids) * train_ratio)
-    train_cases = set(case_ids[:split_idx])
-    val_cases = set(case_ids[split_idx:])
+    # Build sequence -> files mapping from CSV
+    seq_to_files = {}
+    for _, row in df.iterrows():
+        seq_id = row["sequence_id"]
+        img_filename = os.path.basename(row["png_image_path"])
+        if seq_id not in seq_to_files:
+            seq_to_files[seq_id] = []
+        seq_to_files[seq_id].append(img_filename)
 
-    print(f"Positive cases — Total: {len(case_ids)}, Train: {len(train_cases)}, Val: {len(val_cases)}")
+    print(f"Loaded {len(seq_to_files)} sequences from CSV")
 
-    train_files = []
-    val_files = []
-    dedup_stats = dict()
-
-    for cid in tqdm(case_ids, desc="Deleting duplicate cases"):
-        files = case_to_files[cid]
-        filtered_files, stats = _deduplicate_consecutive_frames(
-            files,
-            images_dir=images_dir,
-            threshold=duplicate_threshold,
-        )
-        for key in stats:
-            dedup_stats[key] = dedup_stats.get(key, 0) + stats[key]
-        if cid in train_cases:
-            train_files.extend(filtered_files)
-        else:
-            val_files.extend(filtered_files)
-
-    # --- Split negative cases (if provided) ---
-    if neg_case_to_files:
-        neg_case_names = sorted(neg_case_to_files.keys())
-        random.shuffle(neg_case_names)
-
-        neg_split_idx = int(len(neg_case_names) * train_ratio)
-        neg_train = set(neg_case_names[:neg_split_idx])
-        neg_val = set(neg_case_names[neg_split_idx:])
-
-        print(f"Negative cases — Total: {len(neg_case_names)}, Train: {len(neg_train)}, Val: {len(neg_val)}")
-
-        for nc in tqdm(neg_case_names, desc="Deleting duplicate negative cases"):
-            files = neg_case_to_files[nc]
-            filtered_files, stats = _deduplicate_consecutive_frames(
-                files,
-                images_dir=images_dir,
-                threshold=duplicate_threshold,
-            )
-            for key in stats:
-                dedup_stats[key] = dedup_stats.get(key, 0) + stats[key]
-
-            if nc in neg_train:
-                train_files.extend(filtered_files)
-            else:
-                val_files.extend(filtered_files)
-
-    if duplicate_threshold > 0.0:
-        print(
-            "Consecutive-frame dedup stats (case-level): "
-            f"total={dedup_stats['total']}, "
-            f"redundant_detected={dedup_stats['redundant_detected']}, "
-        )
-
-    print(f"Total files — Train: {len(train_files)}, Val: {len(val_files)}")
-
-    print("Copying files to Train folder...")
-    copy_yolo_files(
-        src_images_dir=images_dir,
-        src_labels_dir=labels_dir,
-        dst_images_dir=os.path.join(output_dir, 'images', 'train'),
-        dst_labels_dir=os.path.join(output_dir, 'labels', 'train'),
-        file_list=train_files
+    return split_by_groups(
+        group_to_files=seq_to_files,
+        images_dir=images_dir,
+        labels_dir=labels_dir,
+        output_dir=output_dir,
+        train_ratio=train_ratio,
+        seed=seed,
+        duplicate_threshold=duplicate_threshold,
+        group_label="sequence",
     )
 
-    print("Copying files to Val folder...")
-    copy_yolo_files(
-        src_images_dir=images_dir,
-        src_labels_dir=labels_dir,
-        dst_images_dir=os.path.join(output_dir, 'images', 'val'),
-        dst_labels_dir=os.path.join(output_dir, 'labels', 'val'),
-        file_list=val_files
+
+def split_sun_dataset_by_case(
+    case_to_files: dict,
+    images_dir: str,
+    labels_dir: str,
+    output_dir: str,
+    neg_case_to_files: Optional[dict] = None,
+    train_ratio: float = 0.8,
+    seed: int = 42,
+    duplicate_threshold: float = 0.02,
+):
+    """
+    Split a SUN-style dataset ensuring frames from the same case stay together.
+
+    Args:
+        case_to_files: dict mapping case_id -> list of positive image filenames
+        images_dir: Directory containing all images
+        labels_dir: Directory containing all YOLO labels
+        output_dir: Root output directory
+        neg_case_to_files: Optional dict mapping case_name -> list of negative image filenames
+        train_ratio: Target ratio of frames for training
+        seed: Random seed
+        duplicate_threshold: Deduplication threshold
+    """
+    # Merge positive and negative cases into a single dict
+    # Use string keys to unify types (positive cases are int, negative are str)
+    all_cases = {f"pos_{k}": v for k, v in case_to_files.items()}
+
+    if neg_case_to_files:
+        all_cases.update(neg_case_to_files)
+        print(f"Combined {len(case_to_files)} positive + {len(neg_case_to_files)} negative cases")
+
+    return split_by_groups(
+        group_to_files=all_cases,
+        images_dir=images_dir,
+        labels_dir=labels_dir,
+        output_dir=output_dir,
+        train_ratio=train_ratio,
+        seed=seed,
+        duplicate_threshold=duplicate_threshold,
+        group_label="case",
     )

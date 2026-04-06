@@ -73,11 +73,10 @@ def process_sun_dataset(dataset_name, dataset_info, base_path):
 
     # Copy negative images (with empty labels)
     neg_case_to_files = {}
-    if os.path.exists(negative_dir):
-        print(f"Processing negative (healthy) images...")
-        neg_case_to_files = sun_copy_negative_images(
-            negative_dir, images_dir, labels_dir
-        )
+    print(f"Processing negative (healthy) images...")
+    neg_case_to_files = sun_copy_negative_images(
+        negative_dir, images_dir, labels_dir
+    )
 
     # Generate verification images
     print(f"Generating verification images for '{dataset_name}'...")
@@ -196,7 +195,7 @@ def main(cfg: PolypDetectionConfig):
                     yolo_out,
                     train_ratio=1 - val_ratio,
                     seed=seed,
-                    duplicate_threshold=duplicate_threshold
+                    duplicate_threshold=0.0  # No deduplication for mask-based datasets
                 )
 
             elif train_info["type"] == "sun_annotation":

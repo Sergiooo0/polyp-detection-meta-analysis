@@ -9,7 +9,7 @@ import mlflow
 from hydra.core.config_store import ConfigStore
 from hydra.core.hydra_config import HydraConfig
 from config import PolypDetectionConfig
-from data.sampler import create_balanced_train_split
+from data.sampler import create_balanced_dataset
 import numpy as np
 
 # Update a setting
@@ -20,7 +20,6 @@ cs.store(name="polyp_detection_config", node=PolypDetectionConfig)
 
 @hydra.main(version_base=None, config_path="configs", config_name="conf.yaml")
 def main(cfg: PolypDetectionConfig):
-    # Directory of Hydra outputs
     hydra_output_dir = HydraConfig.get().runtime.output_dir
 
     # Set MLflow tracking URI to a local directory within the repository for better organization
@@ -38,22 +37,30 @@ def main(cfg: PolypDetectionConfig):
     original_data_yaml_path = os.path.join(cfg.files.base_path, protocol_config.yolo_output_dir, "data.yaml")
 
     # Verify if the dataset need a balance between negatives and positives examples
-    balanced_txt_path = None
     # This is the case of protocol t2 with the SUN dataset, which has 2 negatives examples per positive example
     if cfg.params.protocol == "t2":
         print(f"Applying deterministic negative sampling for protocol {cfg.params.protocol} (Seed: {cfg.params.seed}).")
-        
+
         # Save new files in Hydra output file, don't modify the dataset
         balanced_yaml_path = os.path.join(hydra_output_dir, f"data_balanced_seed_{cfg.params.seed}.yaml")
-        balanced_txt_path = os.path.join(hydra_output_dir, f"train_balanced_seed_{cfg.params.seed}.txt")
-        
-        data_yaml_path = create_balanced_train_split(
+
+        data_yaml_path = create_balanced_dataset(
             data_yaml_path=original_data_yaml_path,
             output_yaml_path=balanced_yaml_path,
-            output_txt_path=balanced_txt_path, 
-            r=1.0, 
-            seed=cfg.params.seed 
+            output_dir=hydra_output_dir,
+            r=1.0,
+            seed=cfg.params.seed
         )
+
+        # Log the balanced dataset files created by create_balanced_dataset
+        mlflow.log_artifact(data_yaml_path, artifact_path="dataset_splits")
+        train_balanced_txt = os.path.join(hydra_output_dir, 'train_balanced.txt')
+        val_balanced_txt = os.path.join(hydra_output_dir, 'val_balanced.txt')
+
+        if os.path.exists(train_balanced_txt):
+            mlflow.log_artifact(train_balanced_txt, artifact_path="dataset_splits")
+        if os.path.exists(val_balanced_txt):
+            mlflow.log_artifact(val_balanced_txt, artifact_path="dataset_splits")
     else:
         data_yaml_path = original_data_yaml_path
 
@@ -78,6 +85,9 @@ def main(cfg: PolypDetectionConfig):
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
     run_name = f"{model_name}_{timestamp}"
 
+    # Close any active MLflow run to avoid conflicts from previous failed executions
+    mlflow.end_run()
+
     run = mlflow.start_run(run_name=run_name)
     run_id = run.info.run_id
 
@@ -86,10 +96,6 @@ def main(cfg: PolypDetectionConfig):
 
     # Save Hydra parameters path as a MLflow artifact for reference
     mlflow.log_artifact(os.path.join(hydra_output_dir, ".hydra/config.yaml"), artifact_path="hydra_config")
-
-    if balanced_txt_path:
-        mlflow.log_artifact(data_yaml_path, artifact_path="dataset_splits")
-        mlflow.log_artifact(balanced_txt_path, artifact_path="dataset_splits")
 
     log_metrics = {}
     tags = {}
@@ -110,9 +116,13 @@ def main(cfg: PolypDetectionConfig):
         patience=100,
     )
 
+    # Load best model weights for validation
+    best_model_path = os.path.join(hydra_output_dir, run_name, "weights", "best.pt")
+    model = YOLO(best_model_path)
+
     # mean Average Precision at IoU=0.5 (mAP50)
     #https://docs.ultralytics.com/reference/utils/metrics/#ultralytics.utils.metrics.DetMetrics
-    metrics = model.val()
+    metrics = model.val(data=data_yaml_path)
     # We only have one class, so we take AP instead of mAP
     ap50 = float(metrics.box.ap50[0])
 
