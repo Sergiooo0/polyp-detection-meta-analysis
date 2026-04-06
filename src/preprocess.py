@@ -1,7 +1,7 @@
 import hydra
 from hydra.core.config_store import ConfigStore
 from config import PolypDetectionConfig
-from data.process_images import masks_to_yolo, check_yolo_bboxes, sun_annotations_to_yolo, sun_copy_negative_images
+from data.process_images import masks_to_yolo, check_yolo_bboxes, sun_annotations_to_yolo, sun_copy_negative_images, deduplicate_consecutive_frames
 from data.split_dataset import split_dataset_by_sequence, split_sun_dataset_by_case, copy_yolo_files
 import os
 import shutil
@@ -10,11 +10,17 @@ cs = ConfigStore.instance()
 cs.store(name="polyp_detection_config", node=PolypDetectionConfig)
 
 
-def process_mask_dataset(dataset_name, dataset_info, base_path):
+def process_mask_dataset(dataset_name, dataset_info, base_path, duplicate_threshold=0.02):
     """
     Process a mask-based dataset (CVC-ClinicDB, CVC-ColonDB).
     Converts binary masks to YOLO bboxes into a temporary _bboxes directory.
-    
+
+    Args:
+        dataset_name: Name of the dataset
+        dataset_info: Dataset configuration
+        base_path: Base path for datasets
+        duplicate_threshold: Threshold for frame deduplication (0.0 to disable)
+
     Returns:
         (images_dir, bboxes_dir) paths for downstream use.
     """
@@ -27,24 +33,46 @@ def process_mask_dataset(dataset_name, dataset_info, base_path):
 
     print(f"Processing mask dataset: {dataset_name}")
     print(f"- Masks: {mask_dir}")
+    print(f"- Images: {images_dir}")
     print(f"- Output: {bboxes_dir}")
 
-    masks_to_yolo(mask_dir, bboxes_dir, class_id=0)
+    # Get list of all mask files
+    files_to_process = sorted([f for f in os.listdir(images_dir) if f.lower().endswith(".png")])
 
+    if duplicate_threshold > 0.0 and files_to_process:
+        dedup_report_dir = os.path.join(os.getcwd(), "dedup_debug", dataset_name)
+        filtered_files, removed_files, stats = deduplicate_consecutive_frames(
+            files_to_process, images_dir, duplicate_threshold, dedup_report_dir
+        )
+        files_to_process = filtered_files
+        print(f"Deduplication: {stats['total']} -> {stats['kept']} (removed {stats['removed']}, {100*stats['removed']/max(1,stats['total']):.1f}%)")
+        if stats['removed'] > 0:
+            print(f"Deduplication report saved to: {dedup_report_dir}")
+
+    # Generate YOLO labels only for non-duplicate files
+    masks_to_yolo(mask_dir, bboxes_dir, class_id=0, file_list=files_to_process)
+
+    # Generate verification images
     print(f"Generating verification images for '{dataset_name}'...")
     verification_dir = os.path.join(os.getcwd(), "bbox_debug", dataset_name)
-    check_yolo_bboxes(images_dir, bboxes_dir, verification_dir, num_images=10)
+    check_yolo_bboxes(images_dir, bboxes_dir, verification_dir, num_images=50)
     print()
 
     return images_dir, bboxes_dir
 
 
-def process_sun_dataset(dataset_name, dataset_info, base_path):
+def process_sun_dataset(dataset_name, dataset_info, base_path, duplicate_threshold=0.02):
     """
     Process a SUN-style annotation dataset.
     Converts per-case annotation txt files to YOLO bboxes and collects all images
     into flat temporary directories.
-    
+
+    Args:
+        dataset_name: Name of the dataset
+        dataset_info: Dataset configuration
+        base_path: Base path for datasets
+        duplicate_threshold: Threshold for frame deduplication (0.0 to disable)
+
     Returns:
         (images_dir, labels_dir, case_to_files, neg_case_to_files) for downstream use.
     """
@@ -55,6 +83,9 @@ def process_sun_dataset(dataset_name, dataset_info, base_path):
     # Temporary flat directories for all SUN images and labels
     images_dir = os.path.join(base_path, dataset_info.positive_dir + "_flat_images")
     labels_dir = os.path.join(base_path, dataset_info.positive_dir + "_flat_labels")
+
+    # Directory to save deduplication verification reports
+    dedup_report_dir = os.path.join(os.getcwd(), "dedup_debug", dataset_name)
 
     if not os.path.exists(annotation_dir):
         raise FileNotFoundError(f"Annotation folder for '{dataset_name}' does not exist: {annotation_dir}")
@@ -68,20 +99,27 @@ def process_sun_dataset(dataset_name, dataset_info, base_path):
 
     # Convert positive annotations to YOLO and collect images
     case_to_files = sun_annotations_to_yolo(
-        annotation_dir, positive_dir, images_dir, labels_dir, class_id=0
+        annotation_dir, positive_dir, images_dir, labels_dir, class_id=0,
+        duplicate_threshold=duplicate_threshold,
+        dedup_report_dir=dedup_report_dir
     )
 
     # Copy negative images (with empty labels)
-    neg_case_to_files = {}
     print(f"Processing negative (healthy) images...")
     neg_case_to_files = sun_copy_negative_images(
-        negative_dir, images_dir, labels_dir
+        negative_dir, images_dir, labels_dir,
+        duplicate_threshold=duplicate_threshold,
+        dedup_report_dir=dedup_report_dir
     )
 
     # Generate verification images
     print(f"Generating verification images for '{dataset_name}'...")
     verification_dir = os.path.join(os.getcwd(), "bbox_debug", dataset_name)
-    check_yolo_bboxes(images_dir, labels_dir, verification_dir, num_images=10)
+    check_yolo_bboxes(images_dir, labels_dir, verification_dir, num_images=50)
+
+    # Print deduplication report summary
+    if duplicate_threshold > 0.0:
+        print(f"\nDeduplication report saved to: {dedup_report_dir}")
     print()
 
     return images_dir, labels_dir, case_to_files, neg_case_to_files
@@ -125,7 +163,7 @@ def main(cfg: PolypDetectionConfig):
             ds_type = dataset_info.type if hasattr(dataset_info, 'type') else "mask"
 
             if ds_type == "mask":
-                images_dir, bboxes_dir = process_mask_dataset(dataset_name, dataset_info, base_path)
+                images_dir, bboxes_dir = process_mask_dataset(dataset_name, dataset_info, base_path, duplicate_threshold)
                 temp_dirs.add(bboxes_dir)
                 dataset_results[dataset_name] = {
                     "type": "mask",
@@ -135,7 +173,7 @@ def main(cfg: PolypDetectionConfig):
 
             elif ds_type == "sun_annotation":
                 images_dir, labels_dir, case_to_files, neg_case_to_files = \
-                    process_sun_dataset(dataset_name, dataset_info, base_path)
+                    process_sun_dataset(dataset_name, dataset_info, base_path, duplicate_threshold)
                 temp_dirs.add(images_dir)
                 temp_dirs.add(labels_dir)
                 dataset_results[dataset_name] = {
@@ -195,7 +233,6 @@ def main(cfg: PolypDetectionConfig):
                     yolo_out,
                     train_ratio=1 - val_ratio,
                     seed=seed,
-                    duplicate_threshold=0.0  # No deduplication for mask-based datasets
                 )
 
             elif train_info["type"] == "sun_annotation":
@@ -209,7 +246,6 @@ def main(cfg: PolypDetectionConfig):
                     neg_case_to_files=train_info.get("neg_case_to_files"),
                     train_ratio=1 - val_ratio,
                     seed=seed,
-                    duplicate_threshold=duplicate_threshold
                 )
 
             # --- Build OOD test set ---

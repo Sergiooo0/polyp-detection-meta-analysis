@@ -2,46 +2,8 @@ import os
 import pandas as pd
 import shutil
 import random
-import cv2
-import numpy as np
 from typing import Optional
 from tqdm import tqdm
-
-
-def _deduplicate_consecutive_frames(file_list: list, images_dir: str, threshold: float = 0.02):
-    """
-    Remove near-duplicate consecutive frames from an ordered list.
-
-    Returns:
-        (filtered_files, stats_dict)
-    """
-    if threshold == 0.0 or len(file_list) == 0:
-        return file_list, {"total": len(file_list), "removed": 0}
-
-    filtered = []
-    prev_frame = None
-
-    for filename in file_list:
-        img_path = os.path.join(images_dir, filename)
-        frame = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-
-        if frame is None:
-            continue
-
-        frame = cv2.resize(frame, (160, 160)).astype(np.float32)
-
-        if prev_frame is None:
-            filtered.append(filename)
-            prev_frame = frame
-            continue
-
-        diff = np.mean(np.abs(frame - prev_frame)) / 255.0
-
-        if diff > threshold:
-            filtered.append(filename)
-            prev_frame = frame
-
-    return filtered, {"total": len(file_list), "removed": len(file_list) - len(filtered)}
 
 
 def copy_yolo_files(
@@ -79,7 +41,8 @@ def copy_yolo_files(
         if os.path.exists(src_txt):
             shutil.copy(src_txt, dst_txt)
         else:
-            open(dst_txt, "a").close()
+            with open(dst_txt, "w"):
+                pass
 
 
 def split_by_groups(
@@ -89,16 +52,14 @@ def split_by_groups(
     output_dir: str,
     train_ratio: float = 0.8,
     seed: int = 42,
-    duplicate_threshold: float = 0.02,
     group_label: str = "group",
 ):
     """
     Split a dataset into train/val ensuring frames from the same group stay together.
 
-    This is the core split function. It:
-    1. Deduplicates all groups first
-    2. Assigns groups to train/val based on FRAME count (not group count)
-    3. Copies files to the output directory
+    This function:
+    1. Assigns groups to train/val based on FRAME count (not group count)
+    2. Copies files to the output directory
 
     Args:
         group_to_files: dict mapping group_id -> list of image filenames
@@ -107,7 +68,6 @@ def split_by_groups(
         output_dir: Root output directory (will create images/train, images/val, etc.)
         train_ratio: Target ratio of frames for training (default 0.8)
         seed: Random seed for reproducibility
-        duplicate_threshold: Threshold for deduplication (0.0 to disable)
         group_label: Label for logging (e.g., "sequence", "case")
 
     Returns:
@@ -117,30 +77,13 @@ def split_by_groups(
         print(f"Warning: No {group_label}s provided, skipping split")
         return {}
 
-    # Deduplicate all groups
-    print(f"Deduplicating {len(group_to_files)} {group_label}s...")
-    deduped = {}
-    total_original = 0
-    total_removed = 0
-
-    for gid in tqdm(sorted(group_to_files.keys()), desc=f"Deduplicating {group_label}s"):
-        files = group_to_files[gid]
-        filtered, stats = _deduplicate_consecutive_frames(files, images_dir, duplicate_threshold)
-        deduped[gid] = filtered
-        total_original += stats["total"]
-        total_removed += stats["removed"]
-
-    if duplicate_threshold > 0.0:
-        print(f"Deduplication: {total_original} -> {total_original - total_removed} "
-              f"(removed {total_removed}, {100*total_removed/total_original:.1f}%)")
-
     # Calculate frame counts and assign groups
-    frame_counts = {gid: len(files) for gid, files in deduped.items()}
+    frame_counts = {gid: len(files) for gid, files in group_to_files.items()}
     total_frames = sum(frame_counts.values())
     target_train = int(total_frames * train_ratio)
 
     # Shuffle groups for random assignment
-    group_ids = list(deduped.keys())
+    group_ids = list(group_to_files.keys())
     random.seed(seed)
     random.shuffle(group_ids)
 
@@ -165,7 +108,7 @@ def split_by_groups(
     train_files = []
     val_files = []
 
-    for gid, files in deduped.items():
+    for gid, files in group_to_files.items():
         if gid in train_groups:
             train_files.extend(files)
         else:
@@ -203,11 +146,13 @@ def split_dataset_by_sequence(
     output_dir: str,
     train_ratio: float = 0.8,
     seed: int = 42,
-    duplicate_threshold: float = 0.02,
 ):
     """
     Split a dataset using a metadata CSV with sequence information.
     Ensures frames from the same video sequence stay together.
+
+    Only includes images that have corresponding label files in labels_dir.
+    This automatically filters out images that were removed during deduplication.
 
     Args:
         csv_path: Path to CSV with 'sequence_id' and 'png_image_path' columns
@@ -216,20 +161,32 @@ def split_dataset_by_sequence(
         output_dir: Root output directory
         train_ratio: Target ratio of frames for training
         seed: Random seed
-        duplicate_threshold: Deduplication threshold
     """
     df = pd.read_csv(csv_path)
 
     # Build sequence -> files mapping from CSV
     seq_to_files = {}
+    skipped_count = 0
+
     for _, row in df.iterrows():
         seq_id = row["sequence_id"]
         img_filename = os.path.basename(row["png_image_path"])
+
+        # Only include if label file exists (filters out deduplicated images)
+        label_filename = os.path.splitext(img_filename)[0] + ".txt"
+        label_path = os.path.join(labels_dir, label_filename)
+
+        if not os.path.exists(label_path):
+            skipped_count += 1
+            continue
+
         if seq_id not in seq_to_files:
             seq_to_files[seq_id] = []
         seq_to_files[seq_id].append(img_filename)
 
     print(f"Loaded {len(seq_to_files)} sequences from CSV")
+    if skipped_count > 0:
+        print(f"Skipped {skipped_count} images without labels (likely removed during deduplication)")
 
     return split_by_groups(
         group_to_files=seq_to_files,
@@ -238,7 +195,6 @@ def split_dataset_by_sequence(
         output_dir=output_dir,
         train_ratio=train_ratio,
         seed=seed,
-        duplicate_threshold=duplicate_threshold,
         group_label="sequence",
     )
 
@@ -251,7 +207,6 @@ def split_sun_dataset_by_case(
     neg_case_to_files: Optional[dict] = None,
     train_ratio: float = 0.8,
     seed: int = 42,
-    duplicate_threshold: float = 0.02,
 ):
     """
     Split a SUN-style dataset ensuring frames from the same case stay together.
@@ -264,7 +219,6 @@ def split_sun_dataset_by_case(
         neg_case_to_files: Optional dict mapping case_name -> list of negative image filenames
         train_ratio: Target ratio of frames for training
         seed: Random seed
-        duplicate_threshold: Deduplication threshold
     """
     # Merge positive and negative cases into a single dict
     # Use string keys to unify types (positive cases are int, negative are str)
@@ -281,6 +235,5 @@ def split_sun_dataset_by_case(
         output_dir=output_dir,
         train_ratio=train_ratio,
         seed=seed,
-        duplicate_threshold=duplicate_threshold,
         group_label="case",
     )
