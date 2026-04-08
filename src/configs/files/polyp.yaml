@@ -1,0 +1,38 @@
+# Base configuration for polyp detection datasets
+
+# Base path for all datasets
+base_path: /path/to/yours/polyp_datasets
+
+# Dataset-specific configurations
+# Supported types:
+#   - mask: Flat directory with binary mask images (CVC-style)
+#   - sun_annotation: Per-case folders with annotation txt files (SUN-style)
+raw_datasets:
+  clinic:
+    type: mask
+    images_dir: CVC-ClinicDB/PNG/Original
+    mask_dir: CVC-ClinicDB/PNG/GroundTruth
+    metadata_file: CVC-ClinicDB/metadata.csv
+  colon:
+    type: mask
+    images_dir: CVC-ColonDB/CVC-ColonDB/images
+    mask_dir: CVC-ColonDB/CVC-ColonDB/masks
+  sun:
+    type: sun_annotation
+    positive_dir: sun/sundatabase_positive
+    negative_dir: sun/sundatabase_negative
+    annotation_dir: sun/sundatabase_positive/annotation_txt
+    metadata_file: sun/metadata.csv
+
+# Definition of protocols for training and testing
+protocols:
+  t1:
+    description: "Train: Clinic | In-test: Clinic | OOD-test: Colon"
+    train_source: clinic 
+    ood_source: colon
+    yolo_output_dir: YOLO_Experiments/T1
+  t2:
+    description: "Train: SUN | In-test: SUN | OOD-test: Colon"
+    train_source: sun
+    ood_source: colon
+    yolo_output_dir: YOLO_Experiments/T2

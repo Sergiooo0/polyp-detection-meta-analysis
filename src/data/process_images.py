@@ -12,7 +12,7 @@ def deduplicate_consecutive_frames(file_list, images_dir, threshold=0.02, save_d
     Args:
         file_list: Ordered list of image filenames
         images_dir: Directory containing the images
-        threshold: MSE difference threshold (0.0-1.0). Below this = duplicate
+        threshold: MAE difference threshold (0.0-1.0). Below this = duplicate
         save_duplicates_dir: If provided, saves side-by-side comparisons of detected duplicates
 
     Returns:
@@ -208,9 +208,6 @@ def sun_annotations_to_yolo(annotation_dir, positive_dir, output_images_dir, out
     # Find all annotation txt files
     annotation_files = sorted(glob.glob(os.path.join(annotation_dir, "case*.txt")))
 
-    if not annotation_files:
-        raise FileNotFoundError(f"No annotation files found in {annotation_dir}")
-
     for ann_file in tqdm(annotation_files, desc="Processing sun annotations"):
         # Extract case ID from filename (e.g., "case1.txt" -> 1)
         case_name = os.path.splitext(os.path.basename(ann_file))[0]  # "case1"
@@ -253,16 +250,10 @@ def sun_annotations_to_yolo(annotation_dir, positive_dir, output_images_dir, out
                 y_max = int(bbox_parts[3])
 
                 src_img_path = os.path.join(case_image_dir, img_filename)
-                if not os.path.exists(src_img_path):
-                    print(f"Warning: Image not found: {src_img_path}")
-                    continue
 
                 # Read image only to get dimensions (grayscale is cheaper than color)
                 if img_filename not in image_size_cache:
                     img = cv2.imread(src_img_path, cv2.IMREAD_GRAYSCALE)
-                    if img is None:
-                        print(f"Warning: Could not read image: {src_img_path}")
-                        continue
                     image_size_cache[img_filename] = img.shape[:2]
 
                 img_height, img_width = image_size_cache[img_filename]
@@ -294,7 +285,7 @@ def sun_annotations_to_yolo(annotation_dir, positive_dir, output_images_dir, out
                     case_files.append(img_filename)
                 total_bboxes += 1
 
-        # Deduplicate case files BEFORE copying
+        # Deduplicate case files before copying
         if duplicate_threshold > 0.0 and case_files:
             case_dedup_dir = os.path.join(dedup_report_dir, f"positive_{case_name}") if dedup_report_dir else None
             filtered_files, removed_files, stats = deduplicate_consecutive_frames(
@@ -413,7 +404,7 @@ def check_yolo_bboxes(images_dir, labels_dir, output_dir, num_images=50):
     os.makedirs(output_dir, exist_ok=True)
 
     # Get valid images that have corresponding label files
-    valid_ext = ('.png', '.jpg', '.jpeg', '.tif', '.tiff')
+    valid_ext = ('.png', '.jpg', '.jpeg')
     all_label_files = [f for f in os.listdir(labels_dir) if f.endswith('.txt')]
 
     # Get image filenames from label filenames
@@ -476,7 +467,7 @@ def check_yolo_bboxes(images_dir, labels_dir, output_dir, num_images=50):
                     # Draw the bounding box in green on the image
                     cv2.rectangle(img, (x_min, y_min), (x_min + w, y_min + h), (0, 255, 0), 2)
 
-                    # Opcional: Put a text label above the bounding box
+                    # Put a text label above the bounding box
                     cv2.putText(img, f"Polyp", (x_min, max(y_min - 5, 10)),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 

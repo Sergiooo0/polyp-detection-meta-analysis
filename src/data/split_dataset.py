@@ -20,7 +20,7 @@ def copy_yolo_files(
     os.makedirs(dst_images_dir, exist_ok=True)
     os.makedirs(dst_labels_dir, exist_ok=True)
 
-    valid_ext = (".png", ".jpg", ".jpeg", ".tif", ".tiff")
+    valid_ext = (".png", ".jpg", ".jpeg")
     files_to_process = file_list if file_list is not None else os.listdir(src_images_dir)
 
     for img_file in tqdm(files_to_process, desc="Copying files"):
@@ -58,7 +58,7 @@ def split_by_groups(
     Split a dataset into train/val ensuring frames from the same group stay together.
 
     This function:
-    1. Assigns groups to train/val based on FRAME count (not group count)
+    1. Assigns groups to train/val based on frames count
     2. Copies files to the output directory
 
     Args:
@@ -186,7 +186,7 @@ def split_dataset_by_sequence(
 
     print(f"Loaded {len(seq_to_files)} sequences from CSV")
     if skipped_count > 0:
-        print(f"Skipped {skipped_count} images without labels (likely removed during deduplication)")
+        print(f"Skipped {skipped_count} images without labels (removed during deduplication)")
 
     return split_by_groups(
         group_to_files=seq_to_files,

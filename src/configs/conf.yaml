@@ -7,13 +7,13 @@ params:
   seed: 42
   val_ratio: 0.2
   # Diff threshold for considering two consecutive frames as near-duplicates (0.0 to 1.0, representing percentage of pixel difference).
-  duplicate_threshold: 0.05
+  duplicate_threshold: 0.02
   # If true, regenerates cached intermediates (e.g., SUN flat images/labels) even if they already exist.
   force_rebuild_cache: false
   # Route to the custom model YOLO yaml file or the name of a ultralystics model yaml.
   #model: models/yolov5TST.yaml
   model: null
-  pretrained_weights: yolov5su.pt
+  pretrained_weights: yolov8n.pt
   img_size: 640
   epochs: 300
   experiment_name: Polyp_Detection
