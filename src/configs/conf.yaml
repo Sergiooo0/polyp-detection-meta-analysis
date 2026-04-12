@@ -19,8 +19,26 @@ params:
   experiment_name: Polyp_Detection
   batch_size: 128
   lr: 0.01
+  lrf: 0.01
+  momentum: 0.937
+  cos_lr: true
+  warmup_epochs: 3.0
+  base_patience: 50
   weight_decay: 0.0005
   optimizer: AdamW
   device: [0, 1]
-  
-  
+  # --- Data Augmentation ---
+  hsv_s: 0.7
+  hsv_v: 0.4
+  degrees: 30.0
+  translate: 0.1
+  flipud: 0.5
+  fliplr: 0.5
+  mosaic: 1.0
+  scale: 0.5
+  erasing: 0.0
+  mixup: 0.1
+  # lr in fine tunning phase without mosaic augmentation.
+  final_phase_lr: 0.01
+  # Extra epochs after the base training, always run without mosaic augmentation.
+  final_no_mosaic_epochs: 10

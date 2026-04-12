@@ -51,6 +51,23 @@ class Params:
     epochs: int
     batch_size: int
     lr: float
+    lrf: float
+    momentum: float
+    cos_lr: bool
+    warmup_epochs: float
+    base_patience: int
+    hsv_s: float
+    hsv_v: float
+    degrees: float
+    translate: float
+    flipud: float
+    fliplr: float
+    mosaic: float
+    scale: float
+    erasing: float
+    mixup: float
+    final_phase_lr: float
+    final_no_mosaic_epochs: int
     weight_decay: float
     optimizer: str
     device: list[int]

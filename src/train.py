@@ -100,21 +100,68 @@ def main(cfg: PolypDetectionConfig):
     log_metrics = {}
     tags = {}
 
-    model.train(
-        data=data_yaml_path,
-        seed=cfg.params.seed,
-        imgsz=cfg.params.img_size,
-        epochs=cfg.params.epochs,
-        batch=cfg.params.batch_size,
-        lr0=cfg.params.lr,
-        weight_decay=cfg.params.weight_decay,
-        optimizer=cfg.params.optimizer,
-        device=cfg.params.device,
-        project=hydra_output_dir,
-        name=run_name,
-        exist_ok=True,
-        patience=100,
-    )
+    train_common_params = {
+        "data": data_yaml_path,
+        "seed": cfg.params.seed,
+        "imgsz": cfg.params.img_size,
+        "batch": cfg.params.batch_size,
+        "lrf": cfg.params.lrf,
+        "weight_decay": cfg.params.weight_decay,
+        "momentum": cfg.params.momentum,
+        "optimizer": cfg.params.optimizer,
+        "cos_lr": cfg.params.cos_lr,
+        "hsv_s": cfg.params.hsv_s,
+        "hsv_v": cfg.params.hsv_v,
+        "degrees": cfg.params.degrees,
+        "translate": cfg.params.translate,
+        "flipud": cfg.params.flipud,
+        "fliplr": cfg.params.fliplr,
+        "mosaic": cfg.params.mosaic,
+        "scale": cfg.params.scale,
+        "erasing": cfg.params.erasing,
+        "mixup": cfg.params.mixup,
+        "device": cfg.params.device,
+        "project": hydra_output_dir,
+        "name": run_name,
+        "exist_ok": True,
+    }
+
+    # Base training phase (with mosaic enabled and early stopping).
+    # https://docs.ultralytics.com/modes/train/#musgd-optimizer
+    base_train_params = {
+        **train_common_params,
+        "epochs": cfg.params.epochs,
+        "lr0": cfg.params.lr,
+        "warmup_epochs": cfg.params.warmup_epochs,
+        "mosaic": cfg.params.mosaic,
+        "patience": cfg.params.base_patience,
+        "close_mosaic": 0,
+    }
+    model.train(**base_train_params)
+
+    # Optional fine-tuning phase without mosaic augmentation.
+    # Yolo has close_mosaic parameter which does what we want to do here, but it won't be apply in early stopping
+    if cfg.params.final_no_mosaic_epochs > 0:
+        # Grab the weights from the end of phase 1
+        last_pt_path = os.path.join(hydra_output_dir, run_name, "weights", "last.pt")
+        
+        model = YOLO(last_pt_path)
+        
+        final_train_params = {
+            **train_common_params,
+            "epochs": cfg.params.final_no_mosaic_epochs,
+            "lr0": cfg.params.final_phase_lr,
+            "warmup_epochs": 0.0,
+            "mosaic": 0.0,
+            "patience": cfg.params.final_no_mosaic_epochs,
+            "close_mosaic": 0,
+            "name": f"{run_name}_finetune", 
+        }
+        
+        model.train(**final_train_params)
+        
+        # Update run_name so validation below looks in the right directory
+        run_name = f"{run_name}_finetune"
 
     # Load best model weights for validation
     best_model_path = os.path.join(hydra_output_dir, run_name, "weights", "best.pt")
