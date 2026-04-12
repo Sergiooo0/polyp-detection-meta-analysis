@@ -55,7 +55,7 @@ class Params:
     momentum: float
     cos_lr: bool
     warmup_epochs: float
-    base_patience: int
+    patience: int
     hsv_s: float
     hsv_v: float
     degrees: float
@@ -63,6 +63,7 @@ class Params:
     flipud: float
     fliplr: float
     mosaic: float
+    close_mosaic: int
     scale: float
     erasing: float
     mixup: float

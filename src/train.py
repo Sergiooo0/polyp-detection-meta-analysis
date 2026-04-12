@@ -121,6 +121,7 @@ def main(cfg: PolypDetectionConfig):
         "erasing": cfg.params.erasing,
         "mixup": cfg.params.mixup,
         "device": cfg.params.device,
+        "deterministic": True,
         "project": hydra_output_dir,
         "name": run_name,
         "exist_ok": True,
@@ -134,8 +135,8 @@ def main(cfg: PolypDetectionConfig):
         "lr0": cfg.params.lr,
         "warmup_epochs": cfg.params.warmup_epochs,
         "mosaic": cfg.params.mosaic,
-        "patience": cfg.params.base_patience,
-        "close_mosaic": 0,
+        "patience": cfg.params.patience,
+        "close_mosaic": cfg.params.close_mosaic if cfg.params.final_no_mosaic_epochs > 0 else 0, 
     }
     model.train(**base_train_params)
 

@@ -15,7 +15,7 @@ def _classify_images(images_dir):
     positives = []
     negatives = []
 
-    for img_name in os.listdir(images_dir):
+    for img_name in sorted(os.listdir(images_dir)):
         if not img_name.lower().endswith(('.png', '.jpg', '.jpeg')):
             continue
 
@@ -39,13 +39,13 @@ def _balance_split(positives, negatives, r, seed):
     Returns:
         (balanced_list, num_positives, num_sampled_negatives)
     """
-    random.seed(seed)
+    rng = random.Random(seed)
     num_negatives_to_sample = int(len(positives) * r)
 
     # Make sure we don't sample more negatives than we have available
     num_negatives_to_sample = min(num_negatives_to_sample, len(negatives))
 
-    sampled_negatives = random.sample(negatives, num_negatives_to_sample)
+    sampled_negatives = rng.sample(negatives, num_negatives_to_sample)
     balanced_list = positives + sampled_negatives
 
     return balanced_list, len(positives), num_negatives_to_sample

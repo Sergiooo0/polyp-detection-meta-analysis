@@ -125,7 +125,7 @@ def masks_to_yolo(input_dir, output_dir, class_id=0, file_list=None):
     # Get files to process
     valid_ext = ('.png', '.jpg', '.jpeg', '.tif', '.tiff')
     if file_list is None:
-        files_to_process = [f for f in os.listdir(input_dir) if f.lower().endswith(valid_ext)]
+        files_to_process = sorted([f for f in os.listdir(input_dir) if f.lower().endswith(valid_ext)])
     else:
         files_to_process = file_list
 

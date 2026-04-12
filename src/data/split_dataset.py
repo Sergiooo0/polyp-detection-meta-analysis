@@ -21,7 +21,7 @@ def copy_yolo_files(
     os.makedirs(dst_labels_dir, exist_ok=True)
 
     valid_ext = (".png", ".jpg", ".jpeg")
-    files_to_process = file_list if file_list is not None else os.listdir(src_images_dir)
+    files_to_process = file_list if file_list is not None else sorted(os.listdir(src_images_dir))
 
     for img_file in tqdm(files_to_process, desc="Copying files"):
         if not img_file.lower().endswith(valid_ext):
@@ -83,9 +83,9 @@ def split_by_groups(
     target_train = int(total_frames * train_ratio)
 
     # Shuffle groups for random assignment
-    group_ids = list(group_to_files.keys())
-    random.seed(seed)
-    random.shuffle(group_ids)
+    group_ids = sorted(group_to_files.keys())
+    rng = random.Random(seed)
+    rng.shuffle(group_ids)
 
     # Greedily assign groups to train until target is reached
     train_groups = set()

@@ -23,7 +23,7 @@ params:
   momentum: 0.937
   cos_lr: true
   warmup_epochs: 3.0
-  base_patience: 50
+  patience: 100
   weight_decay: 0.0005
   optimizer: AdamW
   device: [0, 1]
@@ -35,10 +35,11 @@ params:
   flipud: 0.5
   fliplr: 0.5
   mosaic: 1.0
+  close_mosaic: 15
   scale: 0.5
   erasing: 0.0
   mixup: 0.1
   # lr in fine tunning phase without mosaic augmentation.
-  final_phase_lr: 0.01
+  final_phase_lr: 0.001
   # Extra epochs after the base training, always run without mosaic augmentation.
-  final_no_mosaic_epochs: 10
+  final_no_mosaic_epochs: 0
