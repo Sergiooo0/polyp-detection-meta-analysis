@@ -3,6 +3,7 @@ from hydra.core.config_store import ConfigStore
 from config import PolypDetectionConfig
 from data.process_images import masks_to_yolo, check_yolo_bboxes, sun_annotations_to_yolo, sun_copy_negative_images, deduplicate_consecutive_frames
 from data.split_dataset import split_dataset_by_sequence, split_sun_dataset_by_case, copy_yolo_files
+from utils.connect_to_jetson import transfer_folder, ping
 import os
 import shutil
 
@@ -269,6 +270,61 @@ def main(cfg: PolypDetectionConfig):
         except Exception as e:
             print(f"Error generating protocol '{protocol_name}': {str(e)}\n")
             continue
+
+    print("\n" + "-"*50)
+    print("Sending test set to Jetson")
+    print("-"*50 + "\n")
+    # Transfer test folder to Jetson
+    connection_info = cfg.connection
+    if ping(connection_info.host, connection_info.port):
+        # Now each protocol uses the same test folder, so we can just transfer one of them (the first one)
+        protocol_info = list(cfg.files.protocols.values())[0]
+        protocol_output_dir = os.path.join(base_path, protocol_info.yolo_output_dir)
+        local_test_images_dir = os.path.join(protocol_output_dir, "images", "test")
+        local_test_labels_dir = os.path.join(protocol_output_dir, "labels", "test")
+
+        # create a temporary folder with the test set to transfer
+        # modify its data.yaml to point to the remote test folder
+        temp_transfer_dir = "/tmp/jetson_test_set"
+        os.makedirs("/tmp/jetson_test_set", exist_ok=True)
+        temp_dirs.add(temp_transfer_dir)
+        temp_images_test_dir = os.path.join(temp_transfer_dir, "images", "test")
+        temp_labels_test_dir = os.path.join(temp_transfer_dir, "labels", "test")
+        os.makedirs(temp_images_test_dir, exist_ok=True)
+        os.makedirs(temp_labels_test_dir, exist_ok=True)
+
+        copy_yolo_files(
+            local_test_images_dir,
+            local_test_labels_dir,
+            temp_images_test_dir,
+            temp_labels_test_dir
+        )
+
+        remote_test_images = os.path.join(connection_info.test_folder_remote, "images", "test")
+        temp_data_yaml = os.path.join(temp_transfer_dir, "data.yaml")
+        with open(temp_data_yaml, "w") as yaml_file:
+            yaml_file.write(
+                f"train: images/train\n"
+                f"val: images/val\n"
+                f"test: {remote_test_images}\n"
+                f"\n"
+                f"nc: 1\n"
+                f"names: ['polyp']\n"
+            )
+
+        # transfer the test folder to the Jetson
+        # if there is alreadey a test folder on the Jetson, it will be overwritten
+        transfer_folder(
+            host=connection_info.host,
+            port=connection_info.port,
+            username=connection_info.username,
+            password=connection_info.password,
+            local_dir=temp_transfer_dir,
+            remote_dir=connection_info.test_folder_remote,
+            tar_name="test_folder.tar.gz"
+        )
+    else:
+        print("Skipping transfer: Jetson host is unreachable.")
 
     print("\n" + "-"*50)
     print("Cleaning up temporary files")

@@ -1,0 +1,5 @@
+host : IP_ADDRESS
+port : PORT
+username : USERNAME
+password : PASSWORD
+test_folder_remote : /path/to/remote/test_folder
