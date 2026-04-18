@@ -1,0 +1,7 @@
+# Local tracking DB path. If null, train.py will use repository mlruns.db
+tracking_uri: null
+# MinIO server URL for MLflow artifact storage
+s3_endpoint_url: http://IP:9000
+aws_access_key_id: username
+aws_secret_access_key: password
+artifact_location: s3://mlflow-artifacts/

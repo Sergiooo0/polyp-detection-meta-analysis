@@ -2,3 +2,4 @@ hydra-core
 mlflow
 ultralytics
 hydra-optuna-sweeper optuna
+boto3 #required for mlflow-MinIO integration

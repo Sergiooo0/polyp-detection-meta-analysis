@@ -3,6 +3,7 @@ defaults:
   - _self_
   - files: polyp
   - connection: jetson
+  - mlflow: mlflow
 params:
   protocol: t1
   seed: 42
@@ -17,7 +18,7 @@ params:
   pretrained_weights: yolov8n.pt
   img_size: 640
   epochs: 300
-  experiment_name: Polyp_Detection
+  experiment_name: polyp_detection
   batch_size: 128
   lr: 0.01
   lrf: 0.01

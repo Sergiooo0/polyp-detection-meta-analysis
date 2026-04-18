@@ -44,7 +44,7 @@ class Params:
     duplicate_threshold: float
     # Force regeneration of cached intermediate artifacts (e.g., SUN flat images/labels).
     force_rebuild_cache: bool
-    model: str
+    model: Optional[str]
     pretrained_weights: str
     img_size: int
     experiment_name: str
@@ -81,7 +81,26 @@ class Files:
     protocols: Dict[str, ProtocolConfig]
 
 @dataclass
+class Connection:
+    host: str
+    port: int
+    username: str
+    password: str
+    test_folder_remote: str
+
+@dataclass
+class MlflowConfig:
+    # Configuration for MLflow tracking and MinIO artifact storage
+    tracking_uri: Optional[str]
+    s3_endpoint_url: str
+    aws_access_key_id: str
+    aws_secret_access_key: str
+    artifact_location: str
+
+@dataclass
 class PolypDetectionConfig:
     # Configuration for the polyp detection process
     params: Params
     files: Files
+    connection: Connection
+    mlflow: MlflowConfig
