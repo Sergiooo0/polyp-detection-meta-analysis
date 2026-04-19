@@ -5,7 +5,7 @@ datasets/
 *.jpg
 *.png
 *.tif
-
+test/
 # Model weights 
 *.pt
 *.pth
