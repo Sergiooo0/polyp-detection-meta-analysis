@@ -98,9 +98,18 @@ class MlflowConfig:
     artifact_location: str
 
 @dataclass
+class TestConfig:
+    # Evaluation specific parameters
+    top_k: int              # How many top models to evaluate on Jetson
+    metric: str             # Which metric to use to rank the best runs
+    half_precision: bool    # Use FP16 precision
+    experiment_name: str    # MLflow experiment name to query for runs
+
+@dataclass
 class PolypDetectionConfig:
     # Configuration for the polyp detection process
     params: Params
     files: Files
     connection: Connection
     mlflow: MlflowConfig
+    test: TestConfig

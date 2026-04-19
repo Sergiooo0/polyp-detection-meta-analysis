@@ -45,3 +45,9 @@ params:
   final_phase_lr: 0.001
   # Extra epochs after the base training, always run without mosaic augmentation.
   final_no_mosaic_epochs: 0
+
+test:
+  top_k: 1
+  metric: val_AP50_95
+  half_precision: true
+  experiment_name: polyp_detection

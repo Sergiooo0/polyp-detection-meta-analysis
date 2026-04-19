@@ -25,11 +25,11 @@ def evaluate_on_jetson(run_id, data_yaml):
             results = engine_model.val(data=data_yaml, split='test', batch=1, device=0, verbose=True)
             try:
                 with jtop() as jetson:
-                hw = {
-                    'gpu_util_pct': jetson.stats.get('GPU', 0),
-                    'gpu_temp_c': jetson.temperature.get('GPU', 0),
-                    'power_tot_mw': jetson.power[1].get('tot', {}).get('cur', 0),
-                }
+                    hw = {
+                        'gpu_util_pct': jetson.stats.get('GPU', 0),
+                        'gpu_temp_c': jetson.temperature.get('GPU', 0),
+                        'power_tot_mw': jetson.power[1].get('tot', {}).get('cur', 0),
+                    }
             except Exception:
                 hw = {'gpu_util_pct': -1, 'gpu_temp_c': -1, 'power_tot_mw': -1}
 

@@ -12,4 +12,4 @@ RUN pip3 install --ignore-installed blinker
 RUN pip3 install ultralytics mlflow boto3 jetson-stats fabric
 
 COPY src/ ./src/
-ENTRYPOINT ["python3", "src/test_in_jetson.py"]
+ENTRYPOINT ["python3", "src/jetson_test.py"]

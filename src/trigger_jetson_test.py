@@ -1,0 +1,64 @@
+import os
+import mlflow
+from mlflow.tracking import MlflowClient
+from fabric import Connection
+from utils.get_config import get_config
+from config import PolypDetectionConfig
+
+def main():
+    cfg: PolypDetectionConfig = get_config()
+    print(cfg.test)
+    experiment_name = cfg.test.experiment_name
+    client = MlflowClient()
+    experiment = client.get_experiment_by_name(experiment_name)
+    if experiment is None:
+        print(f"Experiment '{experiment_name}' not found.")
+        return
+    
+    runs = client.search_runs(
+        experiment_ids=[experiment.experiment_id],
+        order_by=[f"metrics.{cfg.test.metric} DESC"],
+        max_results=cfg.test.top_k
+    )
+
+    if not runs:
+        print("No runs found.")
+        return
+
+    # Prepare Fabric connection kwargs (handle password if provided)
+    connect_kwargs = {}
+    if cfg.connection.password:
+        connect_kwargs["password"] = cfg.connection.password
+
+    for i, run in enumerate(runs):
+        run_id = run.info.run_id
+        metric_val = run.data.metrics.get(cfg.test.metric, "N/A")
+        print(f"\n[{i+1}/{cfg.test.top_k}] Triggering Jetson for Run ID: {run_id} ({cfg.test.metric}: {metric_val})")
+        
+        with Connection(
+            host=cfg.connection.host,
+            user=cfg.connection.username,
+            port=cfg.connection.port,
+            connect_kwargs=connect_kwargs
+        ) as c:
+            
+            # 1. CD into the remote test folder
+            # 2. Export MLflow credentials from the Hydra config
+            # 3. Export the dynamic MLFLOW_RUN_ID
+            # 4. Run the Jetson Hydra script
+            cmd = (
+                "docker run --rm --runtime nvidia "
+                f"-e MLFLOW_TRACKING_URI={cfg.mlflow.tracking_uri} "
+                f"-e MLFLOW_S3_ENDPOINT_URL={cfg.mlflow.s3_endpoint_url} "
+                f"-e AWS_ACCESS_KEY_ID={cfg.mlflow.aws_access_key_id} "
+                f"-e AWS_SECRET_ACCESS_KEY={cfg.mlflow.aws_secret_access_key} "
+                f"-e MLFLOW_RUN_ID={run_id} "
+                "yolo-jetson-test" 
+            )
+            
+            print(f"Executing over SSH on {cfg.connection.host}...")
+            c.run(cmd)
+
+
+if __name__ == "__main__":
+    main()
