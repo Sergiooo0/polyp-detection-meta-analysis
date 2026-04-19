@@ -48,16 +48,23 @@ def main():
             # 4. Run the Jetson Hydra script
             cmd = (
                 "docker run --rm --runtime nvidia "
+                f"-v {cfg.connection.test_folder_remote}:/app/test_data "  # Mount remote test folder
                 f"-e MLFLOW_TRACKING_URI={cfg.mlflow.tracking_uri} "
                 f"-e MLFLOW_S3_ENDPOINT_URL={cfg.mlflow.s3_endpoint_url} "
                 f"-e AWS_ACCESS_KEY_ID={cfg.mlflow.aws_access_key_id} "
                 f"-e AWS_SECRET_ACCESS_KEY={cfg.mlflow.aws_secret_access_key} "
                 f"-e MLFLOW_RUN_ID={run_id} "
+                f"-e HALF_PRECISION={str(cfg.test.half_precision)} "
+                f"-e IMGSZ={cfg.params.img_size} "
                 "yolo-jetson-test" 
             )
             
             print(f"Executing over SSH on {cfg.connection.host}...")
-            c.run(cmd)
+            result = c.run(cmd, hide=False, warn=True)
+
+            if result is not None and result.failed:
+                print(f"Evaluation of Run ID {run_id} failed with exit code {result.return_code}.")
+                print(result.stderr)
 
 
 if __name__ == "__main__":
