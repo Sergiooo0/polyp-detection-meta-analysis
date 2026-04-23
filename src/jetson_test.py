@@ -63,8 +63,8 @@ def main():
         ap50 = float(results.box.ap50[0]) if hasattr(results.box, 'ap50') else 0
         ap50_95 = float(results.box.ap[0]) if hasattr(results.box, 'ap') else 0
         
-        mlflow.log_metric('jetson_val_AP50', ap50)
-        mlflow.log_metric('jetson_val_AP50_95', ap50_95)
+        mlflow.log_metric('jetson_AP50', ap50)
+        mlflow.log_metric('jetson_AP50_95', ap50_95)
         mlflow.log_metric('jetson_inference_ms', results.speed.get('inference', 0))
         mlflow.log_metric('jetson_fps', 1000.0 / max(results.speed.get('inference', 1), 0.1))
         
@@ -73,6 +73,8 @@ def main():
         mlflow.log_metric('jetson_power_mw', hw['power_tot_mw'])
         
         mlflow.log_param('jetson_precision_mode', 'FP16' if half_precision else 'FP32')
+
+        mlflow.log_param('jetson_engine_path', engine_path)
 
     print(f"Deployment Evaluation Complete for Run ID: {run_id}")
 

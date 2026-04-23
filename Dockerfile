@@ -1,5 +1,7 @@
 FROM nvcr.io/nvidia/l4t-ml:r36.2.0-py3
 
+ENV PYTHONUNBUFFERED=1
+
 RUN apt-get update && apt-get install -y \
     libgl1-mesa-glx \
     python3-pip \

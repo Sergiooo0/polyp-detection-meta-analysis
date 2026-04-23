@@ -9,6 +9,14 @@ def main():
     cfg: PolypDetectionConfig = get_config()
     print(cfg.test)
     experiment_name = cfg.test.experiment_name
+    if cfg.mlflow.tracking_uri:
+        mlflow.set_tracking_uri(cfg.mlflow.tracking_uri)
+    else:
+        repo_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        mlflow_db_path = os.path.join(repo_dir, "mlruns.db")
+        tracking_uri = f"sqlite:///{mlflow_db_path}"
+        mlflow.set_tracking_uri(tracking_uri)
+
     client = MlflowClient()
     experiment = client.get_experiment_by_name(experiment_name)
     if experiment is None:
@@ -28,7 +36,7 @@ def main():
     # Prepare Fabric connection kwargs (handle password if provided)
     connect_kwargs = {}
     if cfg.connection.password:
-        connect_kwargs["password"] = cfg.connection.password
+        connect_kwargs["password"] = str(cfg.connection.password)
 
     for i, run in enumerate(runs):
         run_id = run.info.run_id
@@ -47,8 +55,9 @@ def main():
             # 3. Export the dynamic MLFLOW_RUN_ID
             # 4. Run the Jetson Hydra script
             cmd = (
-                "docker run --rm --runtime nvidia "
+                "docker run --rm --network host --runtime nvidia "
                 f"-v {cfg.connection.test_folder_remote}:/app/test_data "  # Mount remote test folder
+                "-e PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python "
                 f"-e MLFLOW_TRACKING_URI={cfg.mlflow.tracking_uri} "
                 f"-e MLFLOW_S3_ENDPOINT_URL={cfg.mlflow.s3_endpoint_url} "
                 f"-e AWS_ACCESS_KEY_ID={cfg.mlflow.aws_access_key_id} "
