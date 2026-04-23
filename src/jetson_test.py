@@ -1,19 +1,17 @@
 import os
 import mlflow
 from ultralytics import YOLO
-from utils.get_config import get_config
 from config import PolypDetectionConfig
 from jtop import jtop
 
 def main():
-    cfg: PolypDetectionConfig = get_config()
     # Grab dynamic run ID from SSH environment variables
     run_id = os.environ.get("MLFLOW_RUN_ID")
     if not run_id:
         raise ValueError("MLFLOW_RUN_ID environment variable not found.")
 
     # 2. Set tracking URI (also injected by SSH, but fallback to config just in case)
-    mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", cfg.mlflow.tracking_uri))
+    mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI"))
 
     data_yaml = "app/test_data/data.yaml"  # Path inside the Docker container
 
@@ -38,7 +36,7 @@ def main():
     for _ in range(3):
         optimized.predict(source=data_yaml, device=0, verbose=False)
 
-    print(f"Running validation on protocol: {cfg.params.protocol}...")
+    print(f"Running validation")
     results = optimized.val(
         data=data_yaml,
         device=0,

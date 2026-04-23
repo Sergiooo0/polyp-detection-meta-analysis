@@ -55,7 +55,7 @@ def main():
             # 3. Export the dynamic MLFLOW_RUN_ID
             # 4. Run the Jetson Hydra script
             cmd = (
-                "docker run --rm --network host --runtime nvidia "
+                "docker run --rm --runtime nvidia "
                 f"-v {cfg.connection.test_folder_remote}:/app/test_data "  # Mount remote test folder
                 "-e PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python "
                 f"-e MLFLOW_TRACKING_URI={cfg.mlflow.tracking_uri} "
