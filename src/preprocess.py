@@ -284,7 +284,6 @@ def main(cfg: PolypDetectionConfig):
         local_test_labels_dir = os.path.join(protocol_output_dir, "labels", "test")
 
         # create a temporary folder with the test set to transfer
-        # modify its data.yaml to point to the remote test folder
         temp_transfer_dir = "/tmp/jetson_test_set"
         os.makedirs("/tmp/jetson_test_set", exist_ok=True)
         temp_dirs.add(temp_transfer_dir)
@@ -300,16 +299,13 @@ def main(cfg: PolypDetectionConfig):
             temp_labels_test_dir
         )
 
-        remote_test_images = os.path.join(connection_info.test_folder_remote, "images", "test")
         temp_data_yaml = os.path.join(temp_transfer_dir, "data.yaml")
         with open(temp_data_yaml, "w") as yaml_file:
             yaml_file.write(
-                f"train: images/train\n"
-                f"val: images/val\n"
-                f"test: {remote_test_images}\n"
-                f"\n"
-                f"nc: 1\n"
-                f"names: ['polyp']\n"
+                "test: images/test\n"
+                "\n"
+                "nc: 1\n"
+                "names: ['polyp']\n"
             )
 
         # transfer the test folder to the Jetson

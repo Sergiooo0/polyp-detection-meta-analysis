@@ -1,7 +1,6 @@
 import os
 import mlflow
 from ultralytics import YOLO
-from config import PolypDetectionConfig
 from jtop import jtop
 
 def main():
@@ -13,7 +12,7 @@ def main():
     # 2. Set tracking URI (also injected by SSH, but fallback to config just in case)
     mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI"))
 
-    data_yaml = "app/test_data/data.yaml"  # Path inside the Docker container
+    data_yaml = "/app/test_data/data.yaml"  # Path inside the Docker container
 
     print(f"Downloading weights for Run ID: {run_id}...")
     weights_dir = mlflow.artifacts.download_artifacts(
@@ -28,13 +27,15 @@ def main():
         format='engine',
         half=half_precision,
         device=0,
-        imgsz=os.environ.get("IMGSZ", "640")
+        imgsz=os.environ.get("IMGSZ", "640"),
+        simplify=False,
+        opset=13
     )
 
     print("Loading TensorRT engine and warming up...")
-    optimized = YOLO(engine_path)
+    optimized = YOLO(engine_path, task="detect")
     for _ in range(3):
-        optimized.predict(source=data_yaml, device=0, verbose=False)
+        optimized.predict(source=os.path.join(data_yaml, "images", "test"), device=0, verbose=False)
 
     print(f"Running validation")
     results = optimized.val(

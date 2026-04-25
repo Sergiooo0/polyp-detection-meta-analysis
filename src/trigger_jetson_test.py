@@ -38,6 +38,7 @@ def main():
     if cfg.connection.password:
         connect_kwargs["password"] = str(cfg.connection.password)
 
+    remote_src = "/home/jetuser/polyp-detection-meta-analysis/src"
     for i, run in enumerate(runs):
         run_id = run.info.run_id
         metric_val = run.data.metrics.get(cfg.test.metric, "N/A")
@@ -50,14 +51,11 @@ def main():
             connect_kwargs=connect_kwargs
         ) as c:
             
-            # 1. CD into the remote test folder
-            # 2. Export MLflow credentials from the Hydra config
-            # 3. Export the dynamic MLFLOW_RUN_ID
-            # 4. Run the Jetson Hydra script
             cmd = (
                 "docker run --rm --runtime nvidia "
                 f"-v {cfg.connection.test_folder_remote}:/app/test_data "  # Mount remote test folder
                 "-e PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python "
+                f"-v {remote_src}:/app/src "  # Mount remote source folder (avoid rebuilding) (remove at the end)
                 f"-e MLFLOW_TRACKING_URI={cfg.mlflow.tracking_uri} "
                 f"-e MLFLOW_S3_ENDPOINT_URL={cfg.mlflow.s3_endpoint_url} "
                 f"-e AWS_ACCESS_KEY_ID={cfg.mlflow.aws_access_key_id} "
