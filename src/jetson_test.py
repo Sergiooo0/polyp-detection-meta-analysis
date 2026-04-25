@@ -9,10 +9,10 @@ def main():
     if not run_id:
         raise ValueError("MLFLOW_RUN_ID environment variable not found.")
 
-    # 2. Set tracking URI (also injected by SSH, but fallback to config just in case)
+    # Set tracking URI (also injected by SSH, but fallback to config just in case)
     mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI"))
 
-    data_yaml = "/app/test_data/data.yaml"  # Path inside the Docker container
+    data_folder = "/app/test_data"
 
     print(f"Downloading weights for Run ID: {run_id}...")
     weights_dir = mlflow.artifacts.download_artifacts(
@@ -35,9 +35,10 @@ def main():
     print("Loading TensorRT engine and warming up...")
     optimized = YOLO(engine_path, task="detect")
     for _ in range(3):
-        optimized.predict(source=os.path.join(data_yaml, "images", "test"), device=0, verbose=False)
+        optimized.predict(source=os.path.join(data_folder, "images", "test"), device=0, verbose=False)
 
     print(f"Running validation")
+    data_yaml = os.path.join(data_folder, "data.yaml")
     results = optimized.val(
         data=data_yaml,
         device=0,

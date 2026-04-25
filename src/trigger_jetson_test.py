@@ -10,12 +10,10 @@ def main():
     print(cfg.test)
     experiment_name = cfg.test.experiment_name
     if cfg.mlflow.tracking_uri:
-        mlflow.set_tracking_uri(cfg.mlflow.tracking_uri)
-    else:
-        repo_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        mlflow_db_path = os.path.join(repo_dir, "mlruns.db")
-        tracking_uri = f"sqlite:///{mlflow_db_path}"
+        tracking_uri = cfg.mlflow.tracking_uri
         mlflow.set_tracking_uri(tracking_uri)
+    else:
+        raise ValueError("MLflow tracking URI (http://<SERVER_IP>:5000) must be set in the configuration.")
 
     client = MlflowClient()
     experiment = client.get_experiment_by_name(experiment_name)
@@ -56,7 +54,7 @@ def main():
                 f"-v {cfg.connection.test_folder_remote}:/app/test_data "  # Mount remote test folder
                 "-e PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python "
                 f"-v {remote_src}:/app/src "  # Mount remote source folder (avoid rebuilding) (remove at the end)
-                f"-e MLFLOW_TRACKING_URI={cfg.mlflow.tracking_uri} "
+                f"-e MLFLOW_TRACKING_URI={tracking_uri} "
                 f"-e MLFLOW_S3_ENDPOINT_URL={cfg.mlflow.s3_endpoint_url} "
                 f"-e AWS_ACCESS_KEY_ID={cfg.mlflow.aws_access_key_id} "
                 f"-e AWS_SECRET_ACCESS_KEY={cfg.mlflow.aws_secret_access_key} "
