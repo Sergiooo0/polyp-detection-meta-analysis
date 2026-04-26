@@ -2,10 +2,14 @@ import os
 import mlflow
 from ultralytics import YOLO
 from jtop import jtop
+import torch
+import gc
 
 def main():
+    print("EXECUTING JETSON TEST SCRIPT...")
     # Grab dynamic run ID from SSH environment variables
     run_id = os.environ.get("MLFLOW_RUN_ID")
+    print(f"MLFLOW_RUN_ID: {run_id}")
     if not run_id:
         raise ValueError("MLFLOW_RUN_ID environment variable not found.")
 
@@ -27,7 +31,7 @@ def main():
         format='engine',
         half=half_precision,
         device=0,
-        imgsz=os.environ.get("IMGSZ", "640"),
+        imgsz=int(os.environ.get("IMGSZ", 640)),
         simplify=False,
         opset=13
     )
@@ -37,13 +41,14 @@ def main():
     for _ in range(3):
         optimized.predict(source=os.path.join(data_folder, "images", "test"), device=0, verbose=False)
 
-    print(f"Running validation")
+    print(f"Running Testing")
     data_yaml = os.path.join(data_folder, "data.yaml")
     results = optimized.val(
         data=data_yaml,
         device=0,
         batch=1, 
         verbose=True,
+        split='test'
     )
 
     # Collect hardware metrics via jtop
@@ -65,6 +70,9 @@ def main():
         
         mlflow.log_metric('jetson_AP50', ap50)
         mlflow.log_metric('jetson_AP50_95', ap50_95)
+        mlflow.log_metric('jetson_precision', results.box.p[0])
+        mlflow.log_metric('jetson_recall', results.box.r[0])
+        mlflow.log_metric('jetson_f1', results.box.f1[0])
         mlflow.log_metric('jetson_inference_ms', results.speed.get('inference', 0))
         mlflow.log_metric('jetson_fps', 1000.0 / max(results.speed.get('inference', 1), 0.1))
         
@@ -76,6 +84,9 @@ def main():
 
         mlflow.log_param('jetson_engine_path', engine_path)
 
+    torch.cuda.synchronize()
+    del optimized  # Clean up engine from GPU memory
+    gc.collect()
     print(f"Deployment Evaluation Complete for Run ID: {run_id}")
 
 if __name__ == "__main__":

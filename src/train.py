@@ -274,10 +274,8 @@ def main(cfg: PolypDetectionConfig):
 
         # Extract optimum confidence threshold based on F1 score
         best_f1 = float(metrics.box.f1[0])
-        optimal_p = float(metrics.box.p[0])
-        optimal_r = float(metrics.box.r[0])
         optimal_conf = extract_optimal_conf_threshold(metrics)
-        print(f"Optimal Conf Threshold: {optimal_conf:.3f}, F1: {best_f1:.4f} (P: {optimal_p:.4f}, R: {optimal_r:.4f})\n")
+        print(f"Optimal Conf Threshold: {optimal_conf:.3f}, F1: {best_f1:.4f} \n")
 
         log_metrics = {
             "val_AP50": ap50,
@@ -285,8 +283,6 @@ def main(cfg: PolypDetectionConfig):
             "metrics/mAP75B": ap75,
             "val_fitness": fitness,
             "metrics/best_f1B": best_f1,
-            "metrics/precision": optimal_p,
-            "metrics/recall": optimal_r,
             "metrics/optimal_conf": optimal_conf,
         }
         tags = {

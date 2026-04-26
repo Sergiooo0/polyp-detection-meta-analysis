@@ -302,6 +302,7 @@ def main(cfg: PolypDetectionConfig):
         temp_data_yaml = os.path.join(temp_transfer_dir, "data.yaml")
         with open(temp_data_yaml, "w") as yaml_file:
             yaml_file.write(
+                "val: images/test\n"
                 "test: images/test\n"
                 "\n"
                 "nc: 1\n"

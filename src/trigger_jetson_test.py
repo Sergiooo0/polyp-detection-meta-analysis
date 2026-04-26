@@ -65,7 +65,7 @@ def main():
             )
             
             print(f"Executing over SSH on {cfg.connection.host}...")
-            result = c.run(cmd, hide=False, warn=True)
+            result = c.run(cmd, hide=False, warn=True, pty=True)
 
             if result is not None and result.failed:
                 print(f"Evaluation of Run ID {run_id} failed with exit code {result.return_code}.")
