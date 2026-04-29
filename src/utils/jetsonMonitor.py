@@ -27,8 +27,8 @@ class JetsonMonitor(threading.Thread):
                     if jetson.ok():
                         self.power_samples.append(jetson.stats["Power TOT"])
                         self.gpu_util_samples.append(jetson.stats["GPU"])
-                        self.gpu_temp_samples.append(jetson.stats["Temp_gpu"])
-                        self.cpu_temp_samples.append(jetson.stats["Temp_cpu"])
+                        self.gpu_temp_samples.append(jetson.stats["Temp gpu"])
+                        self.cpu_temp_samples.append(jetson.stats["Temp cpu"])
                         self.ram_util_samples.append(jetson.stats["RAM"])
                         core_values = [jetson.stats.get(k, 0) for k in self.cpu_keys]
                         self.cpu_util_samples.append(sum(core_values))
