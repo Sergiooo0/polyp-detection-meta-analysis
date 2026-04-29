@@ -5,6 +5,7 @@ from jtop import jtop
 import json
 import torch
 import gc
+from utils.jetsonMonitor import JetsonMonitor
 
 def main():
     print("EXECUTING JETSON TEST SCRIPT...")
@@ -53,6 +54,10 @@ def main():
 
     print(f"Running Testing")
     data_yaml = os.path.join(data_folder, "data.yaml")
+
+    monitor = JetsonMonitor(delay=0.2)
+    monitor.start()
+
     results = optimized.val(
         data=data_yaml,
         device=0,
@@ -63,17 +68,9 @@ def main():
         imgsz=int(os.environ.get("IMGSZ", 640))
     )
 
-    # Collect hardware metrics via jtop
-    try:
-        with jtop() as jetson:
-            hw = {
-                'gpu_util_pct': jetson.stats.get('GPU', 0),
-                'gpu_temp_c': jetson.temperature.get('GPU', 0),
-                'power_tot_mw': jetson.power[1].get('tot', {}).get('cur', 0) if len(jetson.power) > 1 else 0,
-            }
-    except Exception as e:
-        print(f"Warning: jtop not available ({e}).")
-        hw = {'gpu_util_pct': -1, 'gpu_temp_c': -1, 'power_tot_mw': -1}
+    monitor.stopped = True
+    monitor.join()
+    hw = monitor.get_stats()
 
     print("Logging metrics back to MLflow (Nested Run)...")
     with mlflow.start_run(run_id=run_id, nested=True):
@@ -84,10 +81,8 @@ def main():
         recall_at_opt = float(results.box.mr)
         f1_at_opt = 2 * (precision_at_opt * recall_at_opt) / (precision_at_opt + recall_at_opt + 1e-9)
 
-        print(results.box.p)
-        print(results.box.r)
-        print(results.box.f1)
-        
+        print(results.box.curves_results)
+
         mlflow.log_metric('jetson_AP50', ap50)
         mlflow.log_metric('jetson_AP50_95', ap50_95)
         mlflow.log_metric('jetson_precision', results.box.p[0])
@@ -99,9 +94,8 @@ def main():
         mlflow.log_metric('jetson_inference_ms', results.speed.get('inference', 0))
         mlflow.log_metric('jetson_fps', 1000.0 / max(results.speed.get('inference', 1), 0.1))
         
-        mlflow.log_metric('jetson_gpu_util_pct', hw['gpu_util_pct'])
-        mlflow.log_metric('jetson_gpu_temp_c', hw['gpu_temp_c'])
-        mlflow.log_metric('jetson_power_mw', hw['power_tot_mw'])
+        for key, value in hw.items():
+            mlflow.log_metric(f'jetson_{key}', value)
         
         mlflow.log_param('jetson_precision_mode', 'FP16' if half_precision else 'FP32')
 
