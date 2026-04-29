@@ -2,6 +2,7 @@ import os
 import mlflow
 from ultralytics import YOLO
 from jtop import jtop
+import json
 import torch
 import gc
 
@@ -23,6 +24,15 @@ def main():
         run_id=run_id, artifact_path='weights'
     )
     weights_file = os.path.join(weights_dir, 'best.pt')
+    deployment_dir = mlflow.artifacts.download_artifacts(
+        run_id=run_id, artifact_path='deployment_info'
+    )
+    deployment_file = os.path.join(deployment_dir, 'deployment_metadata.json')
+
+    with open(deployment_file, 'r') as f:
+        deployment_metadata = json.load(f)
+    
+    opt_conf = deployment_metadata["optimal_conf_threshold"]
 
     print("Exporting model to TensorRT...")
     model = YOLO(weights_file)
@@ -46,9 +56,11 @@ def main():
     results = optimized.val(
         data=data_yaml,
         device=0,
-        batch=1, 
+        batch=1,    
         verbose=True,
-        split='test'
+        split='test',
+        conf=opt_conf,
+        imgsz=int(os.environ.get("IMGSZ", 640))
     )
 
     # Collect hardware metrics via jtop
@@ -65,14 +77,25 @@ def main():
 
     print("Logging metrics back to MLflow (Nested Run)...")
     with mlflow.start_run(run_id=run_id, nested=True):
-        ap50 = float(results.box.ap50[0]) if hasattr(results.box, 'ap50') else 0
-        ap50_95 = float(results.box.ap[0]) if hasattr(results.box, 'ap') else 0
+        ap50 = float(results.box.ap50[0])
+        ap50_95 = float(results.box.ap[0])
+
+        precision_at_opt = float(results.box.mp)
+        recall_at_opt = float(results.box.mr)
+        f1_at_opt = 2 * (precision_at_opt * recall_at_opt) / (precision_at_opt + recall_at_opt + 1e-9)
+
+        print(results.box.p)
+        print(results.box.r)
+        print(results.box.f1)
         
         mlflow.log_metric('jetson_AP50', ap50)
         mlflow.log_metric('jetson_AP50_95', ap50_95)
         mlflow.log_metric('jetson_precision', results.box.p[0])
         mlflow.log_metric('jetson_recall', results.box.r[0])
         mlflow.log_metric('jetson_f1', results.box.f1[0])
+        mlflow.log_metric('jetson_precision_at_opt_conf', precision_at_opt)
+        mlflow.log_metric('jetson_recall_at_opt_conf', recall_at_opt)
+        mlflow.log_metric('jetson_f1_at_opt_conf', f1_at_opt)
         mlflow.log_metric('jetson_inference_ms', results.speed.get('inference', 0))
         mlflow.log_metric('jetson_fps', 1000.0 / max(results.speed.get('inference', 1), 0.1))
         
