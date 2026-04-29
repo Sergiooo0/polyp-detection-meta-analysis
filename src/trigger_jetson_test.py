@@ -1,4 +1,3 @@
-import os
 import mlflow
 from mlflow.tracking import MlflowClient
 from fabric import Connection
@@ -50,10 +49,11 @@ def main():
         ) as c:
             
             cmd = (
-                "docker run --rm --runtime nvidia "
+                "docker run --rm --runtime nvidia " # Use NVIDIA runtime for GPU access
                 f"-v {cfg.connection.test_folder_remote}:/app/test_data "  # Mount remote test folder
                 "-e PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python "
                 f"-v {remote_src}:/app/src "  # Mount remote source folder (avoid rebuilding) (remove at the end)
+                "-v /run/jtop.sock:/run/jtop.sock " # Mount jtop socket for hardware monitoring
                 f"-e MLFLOW_TRACKING_URI={tracking_uri} "
                 f"-e MLFLOW_S3_ENDPOINT_URL={cfg.mlflow.s3_endpoint_url} "
                 f"-e AWS_ACCESS_KEY_ID={cfg.mlflow.aws_access_key_id} "
