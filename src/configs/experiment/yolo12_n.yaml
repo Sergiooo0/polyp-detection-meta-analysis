@@ -1,0 +1,5 @@
+# @package _global_
+params:
+  model: yolo12n.yaml
+  pretrained_weights: yolo12n.pt
+  model_name: 12n

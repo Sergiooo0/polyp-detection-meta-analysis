@@ -4,18 +4,18 @@ defaults:
   - files: polyp
   - connection: jetson
   - mlflow: mlflow
+  - experiment: null
 params:
   protocol: t1
   seed: 42
-  val_ratio: 0.5
-  # Diff threshold for considering two consecutive frames as near-duplicates (0.0 to 1.0, representing percentage of pixel difference).
-  duplicate_threshold: 0.02
+  val_ratio: 0.2
   # If true, regenerates cached intermediates (e.g., SUN flat images/labels) even if they already exist.
   force_rebuild_cache: false
   # Route to the custom model YOLO yaml file or the name of a ultralystics model yaml.
   #model: models/yolov5TST.yaml
   model: null
-  pretrained_weights: yolov8n.pt
+  pretrained_weights: yolo12n.pt
+  model_name: null
   img_size: 640
   epochs: 300
   experiment_name: polyp_detection
@@ -25,7 +25,7 @@ params:
   momentum: 0.937
   cos_lr: true
   warmup_epochs: 3.0
-  patience: 100
+  patience: 25
   weight_decay: 0.0005
   optimizer: AdamW
   device: [0, 1]

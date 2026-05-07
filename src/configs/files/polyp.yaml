@@ -13,16 +13,19 @@ raw_datasets:
     images_dir: CVC-ClinicDB/PNG/Original
     mask_dir: CVC-ClinicDB/PNG/GroundTruth
     metadata_file: CVC-ClinicDB/metadata.csv
+    duplicate_threshold: 0.04
   colon:
     type: mask
     images_dir: CVC-ColonDB/CVC-ColonDB/images
     mask_dir: CVC-ColonDB/CVC-ColonDB/masks
+    duplicate_threshold: 0.04
   sun:
     type: sun_annotation
     positive_dir: sun/sundatabase_positive
     negative_dir: sun/sundatabase_negative
     annotation_dir: sun/sundatabase_positive/annotation_txt
     metadata_file: sun/metadata.csv
+    duplicate_threshold: 0.07
 
 # Definition of protocols for training and testing
 protocols:

@@ -1,0 +1,5 @@
+# @package _global_
+params:
+  model: "yolov8n.yaml"
+  pretrained_weights: "yolov8n.pt"
+  model_name: 8n
