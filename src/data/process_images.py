@@ -254,6 +254,9 @@ def sun_annotations_to_yolo(annotation_dir, positive_dir, output_images_dir, out
                 # Read image only to get dimensions (grayscale is cheaper than color)
                 if img_filename not in image_size_cache:
                     img = cv2.imread(src_img_path, cv2.IMREAD_GRAYSCALE)
+                    if img is None:
+                        print(f"Warning: Could not read image '{img_filename}' in {case_name}, skipping this annotation")
+                        continue
                     image_size_cache[img_filename] = img.shape[:2]
 
                 img_height, img_width = image_size_cache[img_filename]

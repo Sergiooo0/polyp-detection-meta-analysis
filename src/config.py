@@ -26,6 +26,7 @@ class RawDataset:
     
     # --- Common fields ---
     metadata_file: Optional[str] = None
+    duplicate_threshold: float = 0.0
 
 @dataclass
 class ProtocolConfig:
@@ -40,12 +41,11 @@ class Params:
     protocol: str
     seed : int
     val_ratio: float
-    # Diff threshold for considering two consecutive frames as near-duplicates (0.0 to 1.0, representing percentage of pixel difference).
-    duplicate_threshold: float
     # Force regeneration of cached intermediate artifacts (e.g., SUN flat images/labels).
     force_rebuild_cache: bool
     model: Optional[str]
     pretrained_weights: str
+    model_name: Optional[str]
     img_size: int
     experiment_name: str
     epochs: int

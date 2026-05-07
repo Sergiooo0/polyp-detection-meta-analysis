@@ -53,6 +53,7 @@ def split_by_groups(
     train_ratio: float = 0.8,
     seed: int = 42,
     group_label: str = "group",
+    positive_only_count: bool = False,
 ):
     """
     Split a dataset into train/val ensuring frames from the same group stay together.
@@ -78,8 +79,21 @@ def split_by_groups(
         return {}
 
     # Calculate frame counts and assign groups
-    frame_counts = {gid: len(files) for gid, files in group_to_files.items()}
-    total_frames = sum(frame_counts.values())
+    if positive_only_count:
+        # Count only positive examples towards the train/val target. Positive groups are expected
+        # to be prefixed (e.g., 'pos_') by callers (see split_sun_dataset_by_case).
+        pos_counts = {gid: len(files) if str(gid).startswith("pos_") else 0
+                      for gid, files in group_to_files.items()}
+        total_frames = sum(pos_counts.values())
+        if total_frames == 0:
+            # Fallback to counting all files if no positives were detected
+            frame_counts = {gid: len(files) for gid, files in group_to_files.items()}
+            total_frames = sum(frame_counts.values())
+        else:
+            frame_counts = pos_counts
+    else:
+        frame_counts = {gid: len(files) for gid, files in group_to_files.items()}
+        total_frames = sum(frame_counts.values())
     target_train = int(total_frames * train_ratio)
 
     # Shuffle groups for random assignment
@@ -236,4 +250,5 @@ def split_sun_dataset_by_case(
         train_ratio=train_ratio,
         seed=seed,
         group_label="case",
+        positive_only_count=True,
     )

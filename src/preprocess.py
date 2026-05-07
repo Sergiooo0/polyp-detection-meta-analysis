@@ -145,7 +145,6 @@ def main(cfg: PolypDetectionConfig):
 
     seed = cfg.params.seed
     val_ratio = cfg.params.val_ratio
-    duplicate_threshold = cfg.params.duplicate_threshold
     base_path = cfg.files.base_path
     
     # We will track temp directories to delete them later
@@ -161,6 +160,7 @@ def main(cfg: PolypDetectionConfig):
 
     for dataset_name, dataset_info in cfg.files.raw_datasets.items():
         try:
+            duplicate_threshold = dataset_info.duplicate_threshold
             ds_type = dataset_info.type if hasattr(dataset_info, 'type') else "mask"
 
             if ds_type == "mask":
