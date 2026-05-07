@@ -49,17 +49,17 @@ def resolve_data_yaml_path(cfg: PolypDetectionConfig, hydra_output_dir: str, ori
     # Verify if the dataset need a balance between negatives and positives examples
     # This is the case of protocol t2 with the SUN dataset, which has 2 negatives examples per positive example
     if cfg.params.protocol == "t2":
-        print(f"Applying deterministic negative sampling for protocol {cfg.params.protocol} (Seed: {cfg.params.seed}).")
+        print(f"Applying deterministic negative sampling for protocol {cfg.params.protocol} (Seed: 42).")
 
         # Save new files in Hydra output file, don't modify the dataset
-        balanced_yaml_path = os.path.join(hydra_output_dir, f"data_balanced_seed_{cfg.params.seed}.yaml")
+        balanced_yaml_path = os.path.join(hydra_output_dir, f"data_balanced_seed_42.yaml")
 
         data_yaml_path = create_balanced_dataset(
             data_yaml_path=original_data_yaml_path,
             output_yaml_path=balanced_yaml_path,
             output_dir=hydra_output_dir,
             r=1.0,
-            seed=cfg.params.seed,
+            seed=42,
         )
 
         # Log the balanced dataset files created by create_balanced_dataset
@@ -96,6 +96,9 @@ def initialize_model(cfg: PolypDetectionConfig) -> tuple[YOLO, str]:
         model_name = os.path.splitext(os.path.basename(pretrained_weights))[0]
     else:
         raise ValueError("At least one of 'model' or 'pretrained_weights' must be specified in the configuration.")
+    
+    if cfg.params.model_name:
+        model_name = cfg.params.model_name
 
     return model, model_name
 
@@ -132,6 +135,8 @@ def train_model(
         "project": hydra_output_dir,
         "name": run_name,
         "exist_ok": True,
+        "delta": 0.01,
+	    "workers": 4,
     }
 
     # Base training phase (with mosaic enabled and early stopping).
@@ -291,6 +296,7 @@ def main(cfg: PolypDetectionConfig):
             "AP50": ap50,
             "AP50_95": ap50_95,
             "best_f1": best_f1,
+            "seed": cfg.params.seed,
         }
 
         # Log all relevant metrics to MLflow for better tracking and comparison across runs
