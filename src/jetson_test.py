@@ -6,6 +6,8 @@ import json
 import torch
 import gc
 from utils.jetsonMonitor import JetsonMonitor
+import time
+import shutil
 
 def main():
     print("EXECUTING JETSON TEST SCRIPT...")
@@ -21,10 +23,36 @@ def main():
     data_folder = "/app/test_data"
 
     print(f"Downloading weights for Run ID: {run_id}...")
-    weights_dir = mlflow.artifacts.download_artifacts(
-        run_id=run_id, artifact_path='weights'
-    )
-    weights_file = os.path.join(weights_dir, 'best.pt')
+    max_retries = 5
+    weights_file = None
+    for attempt in range(max_retries):
+        try:
+            print(f"Intento {attempt + 1}/{max_retries} de descarga...")
+            weights_dir = mlflow.artifacts.download_artifacts(
+                run_id=run_id, artifact_path='weights'
+            )
+            weights_file = os.path.join(weights_dir, 'best.pt')
+            
+            # Validación: Intentar cargar los metadatos del modelo en CPU
+            # Si el archivo está corrupto (cortado), esto lanzará un error (EOFError, BadZipFile, etc.)
+            _ = torch.load(weights_file, map_location='cpu')
+            
+            print("Pesos descargados y validados correctamente.")
+            break  # Salimos del bucle si todo fue bien
+            
+        except Exception as e:
+            print(f"Error o archivo corrupto detectado: {e}")
+            if attempt < max_retries - 1:
+                print("Limpiando caché y reintentando en 3 segundos...")
+                # Borramos la carpeta corrupta de MLflow para forzar una descarga limpia
+                if 'weights_dir' in locals() and os.path.exists(weights_dir):
+                    shutil.rmtree(weights_dir)
+                time.sleep(3)
+            else:
+                raise RuntimeError(f"Fallo crítico: No se pudieron descargar los pesos tras {max_retries} intentos.")
+    if weights_file is None:
+        raise RuntimeError("Fallo crítico: No se pudo obtener el archivo de pesos después de varios intentos.")
+    
     deployment_dir = mlflow.artifacts.download_artifacts(
         run_id=run_id, artifact_path='deployment_info'
     )
@@ -49,8 +77,12 @@ def main():
 
     print("Loading TensorRT engine and warming up...")
     optimized = YOLO(engine_path, task="detect")
+    test_images = os.path.join(data_folder, "images", "test")
+    first_image = sorted(os.listdir(test_images))[0]
+    warmup_path = os.path.join(test_images, first_image)
+
     for _ in range(3):
-        optimized.predict(source=os.path.join(data_folder, "images", "test"), device=0, verbose=False)
+        optimized.predict(source=warmup_path, device=0, verbose=False)
 
     print(f"Running Testing")
     data_yaml = os.path.join(data_folder, "data.yaml")
@@ -71,35 +103,47 @@ def main():
     monitor.stopped = True
     monitor.join()
     hw = monitor.get_stats()
+    ap50 = float(results.box.ap50[0])
+    ap50_95 = float(results.box.ap[0])
+    p, r = float(results.box.mp), float(results.box.mr)
+    f1 = 2 * (p * r) / (p + r + 1e-9)
+    #print(results.box.curves_results)
 
+    speed_dict = results.speed
+    total_time_ms = speed_dict.get('preprocess', 0) + speed_dict.get('inference', 0) + speed_dict.get('postprocess', 0)
+
+    metrics = {
+        'jetson_AP50': ap50,
+        'jetson_AP50_95': ap50_95,
+        'jetson_precision_at_opt_conf': p,
+        'jetson_recall_at_opt_conf': r,
+        'jetson_f1_at_opt_conf': f1,
+        'jetson_inference_ms': speed_dict.get('inference', 0),
+        'jetson_total_ms': total_time_ms,
+        'jetson_fps': 1000.0 / max(total_time_ms, 0.1)
+    }
+    # Añadir métricas de hardware
+    for key, value in hw.items():
+        metrics[f'jetson_{key}'] = value
     print("Logging metrics back to MLflow (Nested Run)...")
-    with mlflow.start_run(run_id=run_id, nested=True):
-        ap50 = float(results.box.ap50[0])
-        ap50_95 = float(results.box.ap[0])
-
-        precision_at_opt = float(results.box.mp)
-        recall_at_opt = float(results.box.mr)
-        f1_at_opt = 2 * (precision_at_opt * recall_at_opt) / (precision_at_opt + recall_at_opt + 1e-9)
-
-        print(results.box.curves_results)
-
-        mlflow.log_metric('jetson_AP50', ap50)
-        mlflow.log_metric('jetson_AP50_95', ap50_95)
-        mlflow.log_metric('jetson_precision', results.box.p[0])
-        mlflow.log_metric('jetson_recall', results.box.r[0])
-        mlflow.log_metric('jetson_f1', results.box.f1[0])
-        mlflow.log_metric('jetson_precision_at_opt_conf', precision_at_opt)
-        mlflow.log_metric('jetson_recall_at_opt_conf', recall_at_opt)
-        mlflow.log_metric('jetson_f1_at_opt_conf', f1_at_opt)
-        mlflow.log_metric('jetson_inference_ms', results.speed.get('inference', 0))
-        mlflow.log_metric('jetson_fps', 1000.0 / max(results.speed.get('inference', 1), 0.1))
-        
-        for key, value in hw.items():
-            mlflow.log_metric(f'jetson_{key}', value)
-        
-        mlflow.log_param('jetson_precision_mode', 'FP16' if half_precision else 'FP32')
-
-        mlflow.log_param('jetson_engine_path', engine_path)
+    for attempt in range(max_retries):
+        try:
+            with mlflow.start_run(run_id=run_id, nested=True):
+                mlflow.log_metrics(metrics)
+                try:
+                    mlflow.log_param('jetson_engine_path', engine_path)
+                    mlflow.log_param('jetson_precision_mode', 'FP16' if half_precision else 'FP32')
+                except mlflow.exceptions.MlflowException:
+                    print("Los parámetros ya estaban registrados en MLflow. Saltando...")
+            print("Métricas registradas correctamente en MLflow.")
+            break
+        except Exception as e:
+            print(f"Error al registrar métricas en MLflow: {e}")
+            if attempt < max_retries - 1:
+                print("Reintentando en 3 segundos...")
+                time.sleep(3)
+            else:
+                print("Fallo crítico: No se pudieron registrar las métricas tras varios intentos.")
 
     torch.cuda.synchronize()
     del optimized  # Clean up engine from GPU memory
