@@ -111,6 +111,7 @@ def main():
 
     speed_dict = results.speed
     total_time_ms = speed_dict.get('preprocess', 0) + speed_dict.get('inference', 0) + speed_dict.get('postprocess', 0)
+    inference_ms = speed_dict.get('inference', 0)
 
     metrics = {
         'jetson_AP50': ap50,
@@ -118,9 +119,10 @@ def main():
         'jetson_precision_at_opt_conf': p,
         'jetson_recall_at_opt_conf': r,
         'jetson_f1_at_opt_conf': f1,
-        'jetson_inference_ms': speed_dict.get('inference', 0),
+        'jetson_inference_ms': inference_ms,
         'jetson_total_ms': total_time_ms,
-        'jetson_fps': 1000.0 / max(total_time_ms, 0.1)
+        'jetson_fps': 1000.0 / max(total_time_ms, 0.1),
+        'jetson_fps_inference_only': 1000.0 / max(inference_ms, 0.1)
     }
     # Añadir métricas de hardware
     for key, value in hw.items():
