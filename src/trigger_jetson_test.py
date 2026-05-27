@@ -60,7 +60,7 @@ def main():
                 f"-e AWS_SECRET_ACCESS_KEY={cfg.mlflow.aws_secret_access_key} "
                 f"-e MLFLOW_RUN_ID={run_id} "
                 f"-e HALF_PRECISION={str(cfg.test.half_precision)} "
-                f"-e IMGSZ={cfg.params.img_size} "
+                f"-e IMGSZ={cfg.test.img_size} "
                 "yolo-jetson-test" 
             )
             
@@ -70,6 +70,13 @@ def main():
             if result is not None and result.failed:
                 print(f"Evaluation of Run ID {run_id} failed with exit code {result.return_code}.")
                 print(result.stderr)
+                if int(result.return_code) == 139:
+                    print("Segmentation fault detected. This may indicate an out-of-memory error on the Jetson device.")
+                    print(f"Retrying the evaluation for Run ID {run_id}...")
+                    result_retry = c.run(cmd, hide=False, warn=True, pty=True)
+                    if result_retry is not None and result_retry.failed:
+                        print(f"Retry also failed with exit code {result_retry.return_code}.")
+                        print(result_retry.stderr)
 
 
 if __name__ == "__main__":

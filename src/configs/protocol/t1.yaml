@@ -1,0 +1,10 @@
+# @package _global_
+params:
+  protocol: t1
+  batch_size: 32
+  epochs: 250
+  patience: 100
+  lr: 0.001
+  lrf: 0.1
+  degrees: 15.0
+  mosaic: 1.0

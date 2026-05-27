@@ -13,10 +13,14 @@ hydra:
       _target_: optuna.samplers.TPESampler
       seed: 42
     direction: maximize
-    n_trials: 20
+    n_trials: 25
     params:
-      params.lr: interval(0.0001, 0.05) # 0.01
-      params.batch_size: choice(64, 128)
-      params.weight_decay: interval(0.00001, 0.005) # 0.0005
-      params.optimizer: choice("AdamW", "SGD")
+      params.mosaic: choice(0.0, 0.5, 1.0)
+      params.epochs: 200
+      params.degrees: choice(0.0, 10.0, 20.0, 50.0, 70.0, 90.0)
+      params.batch_size: 32
+      params.lr: 0.001
+      params.lrf: 0.1
+      params.protocol: t1
+      params.experiment_name: optuna4
       
