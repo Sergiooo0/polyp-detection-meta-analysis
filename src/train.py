@@ -28,7 +28,7 @@ def get_best_epoch(results_csv_path: str) -> int:
     results.columns = results.columns.str.strip()
 
     # Calculate fitness
-    results["fitness"] = results["metrics/precision(B)"] * 0.0 + results["metrics/recall(B)"] * 0.2 + results["metrics/mAP50(B)"] * 0.1 + results["metrics/mAP50-95(B)"] * 0.7
+    results["fitness"] = results["metrics/precision(B)"] * 0.0 + results["metrics/recall(B)"] * 0.1 + results["metrics/mAP50(B)"] * 0.1 + results["metrics/mAP50-95(B)"] * 0.8
 
     # Find the epoch with the highest fitness
     best_epoch = results['fitness'].idxmax() + 1

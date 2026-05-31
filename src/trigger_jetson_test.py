@@ -59,7 +59,7 @@ def main():
                 f"-e AWS_ACCESS_KEY_ID={cfg.mlflow.aws_access_key_id} "
                 f"-e AWS_SECRET_ACCESS_KEY={cfg.mlflow.aws_secret_access_key} "
                 f"-e MLFLOW_RUN_ID={run_id} "
-                f"-e HALF_PRECISION={str(cfg.test.half_precision)} "
+                f"-e PRECISION_MODE={str(cfg.test.precision_mode)} "
                 f"-e IMGSZ={cfg.test.img_size} "
                 "yolo-jetson-test" 
             )

@@ -102,7 +102,6 @@ class TestConfig:
     # Evaluation specific parameters
     top_k: int              # How many top models to evaluate on Jetson
     metric: str             # Which metric to use to rank the best runs
-    half_precision: bool    # Use FP16 precision
     experiment_name: str    # MLflow experiment name to query for runs
     img_size: int          # Image size to use during evaluation
     precision_mode: str    # Precision mode (e.g., "FP16" or "FP32")
