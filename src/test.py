@@ -7,6 +7,7 @@ import torch
 from ultralytics import YOLO
 import json
 from utils.get_config import get_config
+import time
 from config import PolypDetectionConfig
 
 def main():
@@ -66,7 +67,7 @@ def main():
         data_yaml = os.path.join(datasets_base_path, files_info.yolo_output_dir, "data.yaml")
 
         model = YOLO(weights_file)
-        model.info(detailed=True)
+        model.info()
 
         print("Running validation on test set...")
         use_half_precision = cfg.test.precision_mode.upper() == "FP16"
@@ -88,18 +89,36 @@ def main():
         speed_dict = results.speed
         inference_time_ms = speed_dict.get('inference', 0)
 
+        precision_mode = cfg.test.precision_mode.upper()
         metrics = {
-            f'test_AP50_{cfg.test.precision_mode}': ap50,
-            f'test_AP50_95_{cfg.test.precision_mode}': ap50_95,
-            f'test_precision_at_opt_conf_{cfg.test.precision_mode}': p,
-            f'test_recall_at_opt_conf_{cfg.test.precision_mode}': r,
-            f'test_f1_at_opt_conf_{cfg.test.precision_mode}': f1,
-            f'test_inference_ms_{cfg.test.precision_mode}': inference_time_ms,
-            f'test_fps_{cfg.test.precision_mode}': 1000.0 / max(inference_time_ms, 0.1)
+            'AP50': ap50,
+            'AP50_95': ap50_95,
+            'precision': p,
+            'recall': r,
+            'f1': f1,
+            'fps': 1000.0 / max(inference_time_ms, 0.1)
         }
 
-        with mlflow.start_run(run_id=run_id, nested=True):
+        params = {
+            'precision_mode': precision_mode,
+            'image_size': cfg.test.img_size,
+            'protocol': protocol
+        }
+
+        run_name = f"LocalTest_{precision_mode}_{cfg.test.img_size}_{protocol}"
+
+        with mlflow.start_run(
+            experiment_id=experiment.experiment_id,
+            run_name=run_name,
+            parent_run_id =run_id
+        ):  
+            mlflow.set_tags({"mlflow.parentRunId": run_id})
+            try:
+                mlflow.log_params(params)
+            except Exception as e:
+                print(f"Error logging parameters for Run ID {run_id}: {e}")
             mlflow.log_metrics(metrics)
+            print(f"Logged successfully under nested run: {run_name}")
 
         torch.cuda.synchronize()
         del model  # Clean up engine from GPU memory
