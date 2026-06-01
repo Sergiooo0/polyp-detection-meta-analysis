@@ -39,7 +39,10 @@ def main():
     for i, run in enumerate(runs):
         run_id = run.info.run_id
         metric_val = run.data.metrics.get(cfg.test.metric, "N/A")
-        print(f"\n[{i+1}/{cfg.test.top_k}] Triggering Jetson for Run ID: {run_id} ({cfg.test.metric}: {metric_val})")
+        if metric_val == "N/A" or metric_val < 0.01:
+            print(f"\n[{i+1}/{len(runs)}] Skipping Run ID: {run_id} due to low metric value ({cfg.test.metric}: {metric_val})")
+            continue
+        print(f"\n[{i+1}/{len(runs)}] Triggering Jetson for Run ID: {run_id} ({cfg.test.metric}: {metric_val})")
         
         with Connection(
             host=cfg.connection.host,
