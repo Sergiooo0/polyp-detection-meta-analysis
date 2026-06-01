@@ -112,14 +112,27 @@ def main():
             run_name=run_name,
             parent_run_id =run_id
         ):  
-            mlflow.set_tags({"mlflow.parentRunId": run_id})
             try:
                 mlflow.log_params(params)
             except Exception as e:
-                print(f"Error logging parameters for Run ID {run_id}: {e}")
+                print(f"Error logging parameters: {e}")
             mlflow.log_metrics(metrics)
+
+            
             print(f"Logged successfully under nested run: {run_name}")
 
+        if precision_mode == "FP32" and cfg.test.img_size == 640:
+                # save results to the parent run for easier comparison
+            with mlflow.start_run(run_id=run_id):
+                mlflow.log_metrics({
+                    'test_AP50': ap50,
+                    'test_AP50_95': ap50_95,
+                    'test_precision': p,
+                    'test_recall': r,
+                    'test_f1': f1,
+                    'test_fps': 1000.0 / max(inference_time_ms, 0.1)
+                })
+                print(f"Logged summary metrics to parent run {run_id} for easier comparison.")
         torch.cuda.synchronize()
         del model  # Clean up engine from GPU memory
         gc.collect()
