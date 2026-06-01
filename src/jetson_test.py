@@ -19,10 +19,10 @@ def cleanup_memory():
 def main():
     print("EXECUTING JETSON TEST SCRIPT...")
     # Grab dynamic run ID from SSH environment variables
-    run_id = os.environ.get("MLFLOW_RUN_ID")
+    run_id = os.environ.get("PARENT_RUN_ID")
     print(f"MLFLOW_RUN_ID: {run_id}")
     if not run_id:
-        raise ValueError("MLFLOW_RUN_ID environment variable not found.")
+        raise ValueError("PARENT_RUN_ID environment variable not found.")
 
     # Set tracking URI (also injected by SSH, but fallback to config just in case)
     mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI"))
@@ -162,8 +162,8 @@ def main():
             with mlflow.start_run(
                 experiment_id=experiment_id,
                 run_name=run_name,
+                parent_run_id=run_id
             ):
-                mlflow.set_tags({"mlflow.parentRunId": run_id})
                 try:
                     mlflow.log_params(params)
                 except Exception as e:
@@ -171,7 +171,19 @@ def main():
                 mlflow.log_metrics(metrics)
                 
                 mlflow.log_artifact(engine_path, artifact_path="jetson_engines")
-                    
+            
+            if precision_mode == "FP32" and image_size == 640 and monitor.nvp_model == "25W":
+                # Save this case also in the parent run for easier comparison in the dashboard
+                with mlflow.start_run(run_id=run_id):
+                    mlflow.log_metrics({
+                        "jetson_ap50": ap50,
+                        "jetson_ap50_95": ap50_95,
+                        "jetson_precision": p,
+                        "jetson_recall": r,
+                        "jetson_f1": f1,
+                        "jetson_fps": 1000.0 / max(inference_ms, 0.1)
+                    })
+                    mlflow.log_artifact(engine_path, artifact_path="jetson_engines")
             print("Metrics and params logged successfully.")
             break
         except Exception as e:
@@ -186,4 +198,5 @@ def main():
     os._exit(0)
 
 if __name__ == "__main__":
+    print(mlflow.__version__)
     main()
