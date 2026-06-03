@@ -1,3 +1,4 @@
+import hydra
 import mlflow
 import os
 import gc
@@ -10,8 +11,8 @@ from utils.get_config import get_config
 import time
 from config import PolypDetectionConfig
 
-def main():
-    cfg: PolypDetectionConfig = get_config()
+@hydra.main(version_base=None, config_path="configs", config_name="conf.yaml")
+def main(cfg: PolypDetectionConfig):
     print(cfg.test)
 
     os.environ['MLFLOW_S3_ENDPOINT_URL'] = cfg.mlflow.s3_endpoint_url

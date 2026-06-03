@@ -93,7 +93,7 @@ def main():
     if precision_mode == "INT8":
         export_args["int8"] = True
         export_args["data"] = data_yaml      # CRITICAL: Gives TensorRT calibration images
-        export_args["batch"] = 8             # Recommended image batch size during calibration
+        export_args["batch"] = 1             # The same batch size used during testing
         export_args["workspace"] = 4         # Adjust (in GiB) based on your Jetson model's RAM
     elif precision_mode == "FP16":
         export_args["half"] = True

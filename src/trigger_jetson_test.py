@@ -1,11 +1,12 @@
+import hydra
 import mlflow
 from mlflow.tracking import MlflowClient
 from fabric import Connection
 from utils.get_config import get_config
 from config import PolypDetectionConfig
 
-def main():
-    cfg: PolypDetectionConfig = get_config()
+@hydra.main(version_base=None, config_path="configs", config_name="conf.yaml")
+def main(cfg: PolypDetectionConfig):
     print(cfg.test)
     experiment_name = cfg.test.experiment_name
     if cfg.mlflow.tracking_uri:
