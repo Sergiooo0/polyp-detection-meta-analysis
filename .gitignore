@@ -5,7 +5,8 @@ datasets/
 *.jpg
 *.png
 *.tif
-test/
+t1/
+t2/
 # Model weights 
 *.pt
 *.pth

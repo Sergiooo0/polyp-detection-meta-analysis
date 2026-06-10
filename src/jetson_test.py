@@ -11,13 +11,17 @@ import shutil
 
 def cleanup_memory():
     """Clean the memory by clearing GPU cache and collecting garbage."""
+    print("Cleaning memory...")
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats()
     gc.collect()
+    print("Cleanup complete.")
 
 def main():
-    print("EXECUTING JETSON TEST SCRIPT...")
+    precision_mode = os.environ.get("PRECISION_MODE", "FP32").upper()
+    protocol = os.environ.get("PROTOCOL", "t1").lower()
+    print(f"EXECUTING JETSON TEST SCRIPT with precision mode: {precision_mode}")
     # Grab dynamic run ID from SSH environment variables
     run_id = os.environ.get("PARENT_RUN_ID")
     print(f"MLFLOW_RUN_ID: {run_id}")
@@ -33,6 +37,10 @@ def main():
 
     parent_run = client.get_run(run_id)
     experiment_id = parent_run.info.experiment_id
+    
+    # Extract the 'model' tag from the parent run
+    model_tag = parent_run.data.tags.get("model", "YOLO_model_unknown")
+    seed_tag = parent_run.data.tags.get("seed", "seed_unknown")
 
     print(f"Downloading weights for Run ID: {run_id}...")
     max_retries = 5
@@ -49,7 +57,7 @@ def main():
             _ = torch.load(weights_file, map_location='cpu')
             
             print("Weights downloaded and validated correctly.")
-            break 
+            break
             
         except Exception as e:
             print(f"Error or corrupt file detected: {e}")
@@ -75,57 +83,65 @@ def main():
     opt_conf = deployment_metadata["optimal_conf_threshold"]
 
     print("Exporting model to TensorRT...")
+    cleanup_memory()  # Clean memory before export to ensure maximum available resources
     model = YOLO(weights_file)
-    precision_mode = os.environ.get("PRECISION_MODE", "FP32").upper()
     data_yaml = os.path.join(data_folder, "data.yaml")
     image_size = int(os.environ.get("IMGSZ", 640))
     
-    cleanup_memory()  # Clean memory before export to ensure maximum available resources
-    export_args = {
-        "format": "engine",
-        "device": 0,
-        "imgsz": image_size,
-        "simplify": False,
-        "opset": 13
-    }
-    
-    # Adjust arguments based on precision mode
-    if precision_mode == "INT8":
-        export_args["int8"] = True
-        export_args["data"] = data_yaml      # CRITICAL: Gives TensorRT calibration images
-        export_args["batch"] = 1             # The same batch size used during testing
-        export_args["workspace"] = 4         # Adjust (in GiB) based on your Jetson model's RAM
-    elif precision_mode == "FP16":
-        export_args["half"] = True
+    if precision_mode == "ONNX-FP32":
+        export_args = {
+            "format": "onnx",
+            "device": 0, 
+            "imgsz": image_size,
+            "simplify": False,
+            "opset": 13
+        }
+        device_target = "cpu"
     else:
-        export_args["half"] = False          # Default fallback to FP32
+        export_args = {
+            "format": "engine",
+            "device": 0,
+            "imgsz": image_size,
+            "simplify": False,
+            "opset": 13
+        }
+        device_target = 0
+        
+        if precision_mode == "INT8":
+            export_args["int8"] = True
+            export_args["data"] = data_yaml      
+            export_args["batch"] = 1             
+            export_args["workspace"] = 4         
+        elif precision_mode == "FP16":
+            export_args["half"] = True
+        else:
+            export_args["half"] = False
 
-    # Execute the TensorRT Export
-    engine_path = model.export(**export_args)
-    cleanup_memory()  # Clean memory after export
+    exported_model_path = model.export(**export_args)
+    cleanup_memory()
 
     print("Loading TensorRT engine and warming up...")
-    optimized = YOLO(engine_path, task="detect")
+    optimized = YOLO(exported_model_path, task="detect")
     test_images = os.path.join(data_folder, "images", "test")
     first_image = sorted(os.listdir(test_images))[0]
     warmup_path = os.path.join(test_images, first_image)
 
     for _ in range(3):
-        optimized.predict(source=warmup_path, device=0, verbose=False)
+        optimized.predict(source=warmup_path, device=device_target, verbose=False)
 
-    print(f"Running Testing")
+    print(f"Running Testing on Test Subset...")
 
     monitor = JetsonMonitor(delay=0.2)
     monitor.start()
 
     results = optimized.val(
         data=data_yaml,
-        device=0,
+        device=device_target,
         batch=1,    
         verbose=True,
         split='test',
-        conf=opt_conf,
-        imgsz=image_size
+        imgsz=image_size,
+        conf=opt_conf
     )
 
     monitor.stopped = True
@@ -150,11 +166,28 @@ def main():
     for key, value in hw.items():
         metrics[f'jetson_{key}'] = value
 
+    # Define the updated parameters dictionary
     params = {
         'jetson_precision_mode': precision_mode,
         'jetson_image_size': image_size,
-        'jetson_nvp_model': monitor.nvp_model
+        'jetson_nvp_model': monitor.nvp_model,
+        'model': model_tag,
+        'imgsz': image_size,
+        'precision_mode': precision_mode,
+        'protocol': protocol,
+        'opt_conf_threshold': opt_conf
     }
+    
+    # Define the corresponding tags dictionary (MLflow requires tag values to be strings)
+    tags = {
+        'model': model_tag,
+        'imgsz': str(image_size),
+        'precision_mode': precision_mode,
+        'protocol': protocol,
+        'jetson_nvp_model': monitor.nvp_model,
+        'seed': seed_tag
+    }
+
     print("Logging metrics back to MLflow (Nested Run)...")
     run_name = f"Test_Jetson_{precision_mode}_{image_size}_{monitor.nvp_model}"
     for attempt in range(max_retries):
@@ -166,25 +199,26 @@ def main():
             ):
                 try:
                     mlflow.log_params(params)
+                    mlflow.set_tags(tags)  # Log tags to the nested execution
                 except Exception as e:
-                    print(f"Error while logging params: {e}")
-                mlflow.log_metrics(metrics)
+                    print(f"Error while logging params/tags: {e}")
                 
-                mlflow.log_artifact(engine_path, artifact_path="jetson_engines")
+                mlflow.log_metrics(metrics)
+                mlflow.log_artifact(exported_model_path, artifact_path="jetson_engines")
             
             if precision_mode == "FP32" and image_size == 640 and monitor.nvp_model == "25W":
                 # Save this case also in the parent run for easier comparison in the dashboard
                 with mlflow.start_run(run_id=run_id):
                     mlflow.log_metrics({
-                        "jetson_ap50": ap50,
-                        "jetson_ap50_95": ap50_95,
-                        "jetson_precision": p,
-                        "jetson_recall": r,
-                        "jetson_f1": f1,
-                        "jetson_fps": 1000.0 / max(inference_ms, 0.1)
+                        f"jetson_ap50_{protocol}": ap50,
+                        f"jetson_ap50_95_{protocol}": ap50_95,
+                        f"jetson_precision_{protocol}": p,
+                        f"jetson_recall_{protocol}": r,
+                        f"jetson_f1_{protocol}": f1,
+                        f"jetson_fps_{protocol}": 1000.0 / max(inference_ms, 0.1)
                     })
-                    mlflow.log_artifact(engine_path, artifact_path="jetson_engines")
-            print("Metrics and params logged successfully.")
+                    mlflow.log_artifact(exported_model_path, artifact_path="jetson_engines")
+            print("Metrics, params and tags logged successfully.")
             break
         except Exception as e:
             print(f"Error while logging metrics: {e}")
@@ -198,5 +232,4 @@ def main():
     os._exit(0)
 
 if __name__ == "__main__":
-    print(mlflow.__version__)
     main()

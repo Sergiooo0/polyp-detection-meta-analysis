@@ -13,7 +13,7 @@ COPY ./ultralytics /app/ultralytics
 RUN pip3 install --upgrade pip
 RUN pip3 install -e /app/ultralytics
 RUN pip3 install --ignore-installed blinker
-RUN pip3 install mlflow boto3 jetson-stats fabric onnxslim
+RUN pip3 install mlflow boto3 jetson-stats fabric onnxslim onnxruntime
 
 COPY src/ ./src/
 ENTRYPOINT ["python3", "src/jetson_test.py"]
