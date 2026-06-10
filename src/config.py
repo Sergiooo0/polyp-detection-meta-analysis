@@ -34,6 +34,8 @@ class ProtocolConfig:
     train_source: str
     ood_source: str
     yolo_output_dir: str
+    ood_positive_ratio: Optional[float] = None
+    ood_negative_ratio: Optional[float] = None
     
 @dataclass
 class Params:
@@ -105,6 +107,8 @@ class TestConfig:
     experiment_name: str    # MLflow experiment name to query for runs
     img_size: int          # Image size to use during evaluation
     precision_mode: str    # Precision mode (e.g., "FP16" or "FP32")
+    start_k: int          # Starting index for evaluation (for resuming interrupted evaluations)
+    protocol: str         # Protocol to use for evaluation (e.g., "t1" or "t2")
 
 @dataclass
 class PolypDetectionConfig:

@@ -7,8 +7,6 @@ from fabric import Connection
 import torch
 from ultralytics import YOLO
 import json
-from utils.get_config import get_config
-import time
 from config import PolypDetectionConfig
 
 @hydra.main(version_base=None, config_path="configs", config_name="conf.yaml")
@@ -44,6 +42,13 @@ def main(cfg: PolypDetectionConfig):
 
     for i, run in enumerate(runs):
         run_id = run.info.run_id
+
+        client = mlflow.tracking.MlflowClient()
+
+        parent_run = client.get_run(run_id)
+        model_tag = parent_run.data.tags.get("model", "YOLO_model_unknown")
+        seed_tag = parent_run.data.tags.get("seed", "seed_unknown")
+
         metric_val = run.data.metrics.get(cfg.test.metric, "N/A")
         if metric_val == "N/A" or metric_val < 0.01:
             print(f"\n[{i+1}/{len(runs)}] Skipping Run ID: {run_id} due to low metric value ({cfg.test.metric}: {metric_val})")
@@ -65,7 +70,7 @@ def main(cfg: PolypDetectionConfig):
             deployment_metadata = json.load(f)
         
         opt_conf = deployment_metadata["optimal_conf_threshold"]
-        protocol = deployment_metadata.get("protocol", "t1")
+        protocol = cfg.test.protocol
         datasets_base_path = cfg.files.base_path
         files_info = cfg.files.protocols[protocol]
         data_yaml = os.path.join(datasets_base_path, files_info.yolo_output_dir, "data.yaml")
@@ -105,8 +110,15 @@ def main(cfg: PolypDetectionConfig):
 
         params = {
             'precision_mode': precision_mode,
-            'image_size': cfg.test.img_size,
-            'protocol': protocol
+            'imgsz': cfg.test.img_size,
+            'protocol': protocol,
+            'device': "server",
+            'model': model_tag,
+        }
+
+        tags = {
+            'model': model_tag,
+            'seed': seed_tag
         }
 
         run_name = f"LocalTest_{precision_mode}_{cfg.test.img_size}_{protocol}"
@@ -120,6 +132,11 @@ def main(cfg: PolypDetectionConfig):
                 mlflow.log_params(params)
             except Exception as e:
                 print(f"Error logging parameters: {e}")
+            
+            try:
+                mlflow.set_tags(tags)
+            except Exception as e:
+                print(f"Error logging tags: {e}")
             mlflow.log_metrics(metrics)
 
             
@@ -129,12 +146,12 @@ def main(cfg: PolypDetectionConfig):
                 # save results to the parent run for easier comparison
             with mlflow.start_run(run_id=run_id):
                 mlflow.log_metrics({
-                    'test_AP50': ap50,
-                    'test_AP50_95': ap50_95,
-                    'test_precision': p,
-                    'test_recall': r,
-                    'test_f1': f1,
-                    'test_fps': 1000.0 / max(inference_time_ms, 0.1)
+                    f'test_AP50_{protocol}': ap50,
+                    f'test_AP50_95_{protocol}': ap50_95,
+                    f'test_precision_{protocol}': p,
+                    f'test_recall_{protocol}': r,
+                    f'test_f1_{protocol}': f1,
+                    f'test_fps_{protocol}': 1000.0 / max(inference_time_ms, 0.1)
                 })
                 print(f"Logged summary metrics to parent run {run_id} for easier comparison.")
         torch.cuda.synchronize()

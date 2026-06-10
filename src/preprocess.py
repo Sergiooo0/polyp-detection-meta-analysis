@@ -2,8 +2,9 @@ import hydra
 from hydra.core.config_store import ConfigStore
 from config import PolypDetectionConfig
 from data.process_images import masks_to_yolo, check_yolo_bboxes, sun_annotations_to_yolo, sun_copy_negative_images, deduplicate_consecutive_frames
-from data.split_dataset import split_dataset_by_sequence, split_sun_dataset_by_case, copy_yolo_files
+from data.split_dataset import split_dataset_by_sequence, split_sun_dataset_by_case, select_sun_ood_subset, copy_yolo_files
 from utils.connect_to_jetson import transfer_folder, ping
+import csv
 import os
 import shutil
 
@@ -140,6 +141,37 @@ def create_data_yaml(output_dir):
         yaml_file.write(yaml_content)
     print(f"Created YOLO config file: {yaml_path}\n")
 
+
+def save_case_metadata_csv(metadata_path, positive_case_to_files, negative_case_to_files):
+    os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
+
+    with open(metadata_path, "w", newline="") as metadata_handle:
+        writer = csv.DictWriter(
+            metadata_handle,
+            fieldnames=["case_type", "case_id", "image_count", "image_files"],
+        )
+        writer.writeheader()
+
+        for case_id in sorted(positive_case_to_files.keys()):
+            files = positive_case_to_files[case_id]
+            writer.writerow({
+                "case_type": "positive",
+                "case_id": case_id,
+                "image_count": len(files),
+                "image_files": "|".join(files),
+            })
+
+        for case_name in sorted(negative_case_to_files.keys()):
+            files = negative_case_to_files[case_name]
+            writer.writerow({
+                "case_type": "negative",
+                "case_id": case_name,
+                "image_count": len(files),
+                "image_files": "|".join(files),
+            })
+
+    print(f"Saved SUN test metadata to: {metadata_path}")
+
 @hydra.main(version_base=None, config_path="configs", config_name="conf.yaml")
 def main(cfg: PolypDetectionConfig):
 
@@ -196,6 +228,8 @@ def main(cfg: PolypDetectionConfig):
     print("\n" + "-"*50)
     print("Building YOLO dataset structure (protocols)")
     print("-"*50 + "\n")
+
+    protocol_outputs = []
 
     for protocol_name, protocol_info in cfg.files.protocols.items():
         print(f"Generating Protocol: {protocol_name.upper()}...")
@@ -255,16 +289,59 @@ def main(cfg: PolypDetectionConfig):
             ood_images_dst = os.path.join(yolo_out, "images", "test")
             ood_labels_dst = os.path.join(yolo_out, "labels", "test")
 
-            copy_yolo_files(
-                ood_info["images_dir"],
-                ood_info["labels_dir"],
-                ood_images_dst,
-                ood_labels_dst
-            )
+            if ood_info["type"] == "sun_annotation":
+                positive_ratio = getattr(protocol_info, "ood_positive_ratio", None)
+                negative_ratio = getattr(protocol_info, "ood_negative_ratio", None)
+
+                if positive_ratio is not None and negative_ratio is not None:
+                    selected_positive_files, selected_negative_files, subset_stats = select_sun_ood_subset(
+                        case_to_files=ood_info["case_to_files"],
+                        neg_case_to_files=ood_info.get("neg_case_to_files"),
+                        positive_ratio=positive_ratio,
+                        negative_ratio=negative_ratio,
+                        seed=seed,
+                    )
+
+                    selected_files = selected_positive_files + selected_negative_files
+                    print(
+                        f"SUN OOD subset: {subset_stats['positive_images']} positive images from "
+                        f"{len(subset_stats['positive_cases'])} cases, "
+                        f"{subset_stats['negative_images']} negative images from "
+                        f"{len(subset_stats['negative_cases'])} cases"
+                    )
+
+                    save_case_metadata_csv(
+                        os.path.join(yolo_out, "metadata.csv"),
+                        subset_stats["positive_case_to_files"],
+                        subset_stats["negative_case_to_files"],
+                    )
+
+                    copy_yolo_files(
+                        ood_info["images_dir"],
+                        ood_info["labels_dir"],
+                        ood_images_dst,
+                        ood_labels_dst,
+                        selected_files,
+                    )
+                else:
+                    copy_yolo_files(
+                        ood_info["images_dir"],
+                        ood_info["labels_dir"],
+                        ood_images_dst,
+                        ood_labels_dst,
+                    )
+            else:
+                copy_yolo_files(
+                    ood_info["images_dir"],
+                    ood_info["labels_dir"],
+                    ood_images_dst,
+                    ood_labels_dst
+                )
 
             #Create YOLO config file
 
             create_data_yaml(yolo_out)
+            protocol_outputs.append((protocol_name, yolo_out))
             print()
 
         except Exception as e:
@@ -272,55 +349,59 @@ def main(cfg: PolypDetectionConfig):
             continue
 
     print("\n" + "-"*50)
-    print("Sending test set to Jetson")
+    print("Sending test sets to Jetson")
     print("-"*50 + "\n")
-    # Transfer test folder to Jetson
     connection_info = cfg.connection
     if ping(connection_info.host, connection_info.port):
-        # Now each protocol uses the same test folder, so we can just transfer one of them (the first one)
-        protocol_info = list(cfg.files.protocols.values())[0]
-        protocol_output_dir = os.path.join(base_path, protocol_info.yolo_output_dir)
-        local_test_images_dir = os.path.join(protocol_output_dir, "images", "test")
-        local_test_labels_dir = os.path.join(protocol_output_dir, "labels", "test")
+        for protocol_name, protocol_output_dir in protocol_outputs:
+            local_test_images_dir = os.path.join(protocol_output_dir, "images", "test")
+            local_test_labels_dir = os.path.join(protocol_output_dir, "labels", "test")
 
-        # create a temporary folder with the test set to transfer
-        temp_transfer_dir = "/tmp/jetson_test_set"
-        os.makedirs("/tmp/jetson_test_set", exist_ok=True)
-        temp_dirs.add(temp_transfer_dir)
-        temp_images_test_dir = os.path.join(temp_transfer_dir, "images", "test")
-        temp_labels_test_dir = os.path.join(temp_transfer_dir, "labels", "test")
-        os.makedirs(temp_images_test_dir, exist_ok=True)
-        os.makedirs(temp_labels_test_dir, exist_ok=True)
+            temp_transfer_dir = os.path.join("/tmp", f"jetson_test_set_{protocol_name}")
+            if os.path.exists(temp_transfer_dir):
+                shutil.rmtree(temp_transfer_dir)
+            os.makedirs(temp_transfer_dir, exist_ok=True)
+            temp_dirs.add(temp_transfer_dir)
 
-        copy_yolo_files(
-            local_test_images_dir,
-            local_test_labels_dir,
-            temp_images_test_dir,
-            temp_labels_test_dir
-        )
+            temp_images_test_dir = os.path.join(temp_transfer_dir, "images", "test")
+            temp_labels_test_dir = os.path.join(temp_transfer_dir, "labels", "test")
+            os.makedirs(temp_images_test_dir, exist_ok=True)
+            os.makedirs(temp_labels_test_dir, exist_ok=True)
 
-        temp_data_yaml = os.path.join(temp_transfer_dir, "data.yaml")
-        with open(temp_data_yaml, "w") as yaml_file:
-            yaml_file.write(
-                "train: images/train\n"
-                "val: images/test\n"
-                "test: images/test\n"
-                "\n"
-                "nc: 1\n"
-                "names: ['polyp']\n"
+            copy_yolo_files(
+                local_test_images_dir,
+                local_test_labels_dir,
+                temp_images_test_dir,
+                temp_labels_test_dir
             )
 
-        # transfer the test folder to the Jetson
-        # if there is alreadey a test folder on the Jetson, it will be overwritten
-        transfer_folder(
-            host=connection_info.host,
-            port=connection_info.port,
-            username=connection_info.username,
-            password=connection_info.password,
-            local_dir=temp_transfer_dir,
-            remote_dir=connection_info.test_folder_remote,
-            tar_name="test_folder.tar.gz"
-        )
+            temp_data_yaml = os.path.join(temp_transfer_dir, "data.yaml")
+            with open(temp_data_yaml, "w") as yaml_file:
+                yaml_file.write(
+                    "train: images/train\n"
+                    "val: images/train\n"
+                    "test: images/test\n"
+                    "\n"
+                    "nc: 1\n"
+                    "names: ['polyp']\n"
+                )
+
+            protocol_metadata_path = os.path.join(protocol_output_dir, "metadata.csv")
+            if os.path.exists(protocol_metadata_path):
+                shutil.copy2(protocol_metadata_path, os.path.join(temp_transfer_dir, "metadata.csv"))
+
+            remote_test_dir = os.path.join(connection_info.test_folder_remote, protocol_name)
+
+            # Transfer each protocol test folder to its own remote directory.
+            transfer_folder(
+                host=connection_info.host,
+                port=connection_info.port,
+                username=connection_info.username,
+                password=connection_info.password,
+                local_dir=temp_transfer_dir,
+                remote_dir=remote_test_dir,
+                tar_name=f"test_folder_{protocol_name}.tar.gz"
+            )
     else:
         print("Skipping transfer: Jetson host is unreachable.")
 

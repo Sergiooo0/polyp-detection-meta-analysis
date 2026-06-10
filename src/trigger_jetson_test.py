@@ -38,6 +38,9 @@ def main(cfg: PolypDetectionConfig):
 
     remote_src = "/home/jetuser/polyp-detection-meta-analysis/src"
     for i, run in enumerate(runs):
+        if i+1 < cfg.test.start_k:
+            print(f"Skipping Run ID: {run.info.run_id} (index {i+1}/{len(runs)}) as it's below the starting index {cfg.test.start_k}.")
+            continue
         run_id = run.info.run_id
         metric_val = run.data.metrics.get(cfg.test.metric, "N/A")
         if metric_val == "N/A" or metric_val < 0.01:
@@ -54,7 +57,7 @@ def main(cfg: PolypDetectionConfig):
             
             cmd = (
                 "docker run --rm --runtime nvidia " # Use NVIDIA runtime for GPU access
-                f"-v {cfg.connection.test_folder_remote}:/app/test_data "  # Mount remote test folder
+                f"-v {cfg.connection.test_folder_remote}/{cfg.test.protocol.lower()}:/app/test_data "  # Mount remote test folder
                 "-e PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python "
                 f"-v {remote_src}:/app/src "  # Mount remote source folder (avoid rebuilding) (remove at the end)
                 "-v /run/jtop.sock:/run/jtop.sock " # Mount jtop socket for hardware monitoring
@@ -65,6 +68,7 @@ def main(cfg: PolypDetectionConfig):
                 f"-e PARENT_RUN_ID={run_id} "
                 f"-e PRECISION_MODE={str(cfg.test.precision_mode)} "
                 f"-e IMGSZ={cfg.test.img_size} "
+                f"-e PROTOCOL={cfg.test.protocol} "
                 "yolo-jetson-test" 
             )
             

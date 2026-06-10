@@ -2,6 +2,7 @@ import os
 import pandas as pd
 import shutil
 import random
+import math
 from typing import Optional
 from tqdm import tqdm
 
@@ -252,3 +253,149 @@ def split_sun_dataset_by_case(
         group_label="case",
         positive_only_count=True,
     )
+
+
+def select_sun_ood_subset(
+    case_to_files: dict,
+    neg_case_to_files: Optional[dict] = None,
+    positive_ratio: float = 0.2,
+    negative_ratio: float = 0.1,
+    seed: int = 42,
+):
+    """
+    Select a SUN OOD subset using positive cases in reverse case order.
+
+    Positive cases are accumulated from the last case to the first until the
+    requested fraction of positive images is reached. Negative cases are then
+    sampled at random until the requested fraction of the selected positive
+    images is reached.
+    """
+
+    case_sizes = {case_id: len(files) for case_id, files in case_to_files.items()}
+    if case_sizes:
+        print("SUN positive case sizes after deduplication:")
+        for case_id in sorted(case_sizes.keys()):
+            print(f"  case {case_id}: {case_sizes[case_id]} images")
+
+    def _balanced_sample(case_dict: dict, target_total: int, sample_seed: int):
+        if not case_dict:
+            return {}, 0, 0
+
+        case_ids = list(case_dict.keys())
+        target_per_case = max(1, math.ceil(target_total / len(case_ids)))
+        smallest_case_size = min(len(files) for files in case_dict.values())
+        quota_per_case = min(target_per_case, smallest_case_size)
+
+        rng = random.Random(sample_seed)
+        balanced_case_dict = {}
+
+        for case_id in case_ids:
+            files = list(case_dict[case_id])
+            if len(files) <= quota_per_case:
+                balanced_case_dict[case_id] = files
+            else:
+                balanced_case_dict[case_id] = rng.sample(files, quota_per_case)
+
+        total_files = sum(len(files) for files in balanced_case_dict.values())
+        return balanced_case_dict, total_files, quota_per_case
+
+    total_positive_images = sum(len(files) for files in case_to_files.values())
+    target_positive_images = max(1, math.ceil(total_positive_images * positive_ratio))
+
+    smallest_case_size = min(case_sizes.values()) if case_sizes else 0
+    images_per_case = smallest_case_size
+    factor = 1
+    while images_per_case * len(case_sizes) < target_positive_images:
+        factor += 1
+        images_per_case = smallest_case_size * factor
+
+    print(f"Target positive images: {target_positive_images}")
+    print(f"Smallest case size: {smallest_case_size}")
+    print(f"Selected images per case: {images_per_case} (factor {factor})")
+
+    selected_positive_cases = []
+    selected_positive_case_dict = {}
+    remaining_positive_images = target_positive_images
+    rng = random.Random(seed)
+
+    for case_id in sorted(case_to_files.keys(), reverse=True):
+        if remaining_positive_images <= 0:
+            break
+
+        files = list(case_to_files[case_id])
+        if not files:
+            continue
+
+        take_count = min(images_per_case, len(files), remaining_positive_images)
+        if take_count <= 0:
+            continue
+
+        if take_count == len(files):
+            selected_files = files
+        else:
+            selected_files = rng.sample(files, take_count)
+
+        selected_positive_cases.append(case_id)
+        selected_positive_case_dict[case_id] = selected_files
+        remaining_positive_images -= len(selected_files)
+
+        if remaining_positive_images <= 0:
+            break
+
+    selected_negative_cases = []
+    selected_negative_case_dict = {}
+
+    selected_positive_images = sum(len(files) for files in selected_positive_case_dict.values())
+
+    target_negative_images = math.ceil(selected_positive_images * negative_ratio)
+
+    if neg_case_to_files and target_negative_images > 0:
+        negative_case_sizes = {case_name: len(files) for case_name, files in neg_case_to_files.items()}
+        print("SUN negative case sizes after deduplication:")
+        for case_name in sorted(negative_case_sizes.keys()):
+            print(f"  {case_name}: {negative_case_sizes[case_name]} images")
+
+        negative_case_ids = sorted(neg_case_to_files.keys())
+        num_negative_cases = len(negative_case_ids)
+        negative_images_per_case = max(1, target_negative_images // num_negative_cases)
+        remainder = target_negative_images % num_negative_cases
+
+        print(f"Target negative images: {target_negative_images}")
+        print(f"Selected negative images per case: {negative_images_per_case} (+{remainder} cases get 1 extra)")
+
+        rng = random.Random(seed + 1)
+        for index, case_name in enumerate(negative_case_ids):
+            files = list(neg_case_to_files[case_name])
+            if not files:
+                continue
+
+            quota = negative_images_per_case + (1 if index < remainder else 0)
+            quota = min(quota, len(files))
+            if quota <= 0:
+                continue
+
+            selected_negative_cases.append(case_name)
+            if quota == len(files):
+                selected_negative_case_dict[case_name] = files
+            else:
+                selected_negative_case_dict[case_name] = rng.sample(files, quota)
+
+        selected_negative_images = sum(len(files) for files in selected_negative_case_dict.values())
+    else:
+        selected_negative_images = 0
+
+    selected_positive_files = [img for files in selected_positive_case_dict.values() for img in files]
+    selected_negative_files = [img for files in selected_negative_case_dict.values() for img in files]
+
+    return selected_positive_files, selected_negative_files, {
+        "positive_cases": selected_positive_cases,
+        "positive_images": selected_positive_images,
+        "positive_case_to_files": selected_positive_case_dict,
+        "negative_cases": selected_negative_cases,
+        "negative_images": selected_negative_images,
+        "negative_case_to_files": selected_negative_case_dict,
+        "target_positive_images": target_positive_images,
+        "target_negative_images": target_negative_images,
+        "available_positive_images": total_positive_images,
+        "available_negative_images": sum(len(files) for files in neg_case_to_files.values()) if neg_case_to_files else 0,
+    }
