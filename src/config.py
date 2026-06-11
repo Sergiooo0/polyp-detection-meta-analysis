@@ -27,13 +27,20 @@ class RawDataset:
     # --- Common fields ---
     metadata_file: Optional[str] = None
     duplicate_threshold: float = 0.0
+    cache_dir: Optional[str] = None
+    split_ratios: Optional[Dict[str, float]] = None
 
 @dataclass
 class ProtocolConfig:
     description: str
     train_source: str
-    ood_source: str
     yolo_output_dir: str
+    val_source: Optional[str] = None
+    test_source: Optional[str] = None
+    ood_source: Optional[str] = None
+    train_ratio: Optional[float] = None
+    val_ratio: Optional[float] = None
+    test_ratio: Optional[float] = None
     ood_positive_ratio: Optional[float] = None
     ood_negative_ratio: Optional[float] = None
     
