@@ -2,12 +2,71 @@ import hydra
 import mlflow
 import os
 import gc
+import tempfile
+import shutil
 from mlflow.tracking import MlflowClient
-from fabric import Connection
 import torch
 from ultralytics import YOLO
 import json
 from config import PolypDetectionConfig
+
+def split_positive_negative_populations(test_images_dir, test_labels_dir):
+    """Classify test images into positive and negative"""
+    pos_images = []
+    neg_images = []
+
+    if os.path.exists(test_images_dir):
+        for img_name in os.listdir(test_images_dir):
+            base_name = os.path.splitext(img_name)[0]
+            txt_path = os.path.join(test_labels_dir, base_name + ".txt")
+            
+            if os.path.exists(txt_path) and os.path.getsize(txt_path) > 0:
+                pos_images.append(img_name)
+            else:
+                neg_images.append(img_name)
+                
+    return pos_images, neg_images
+
+def evaluate_positive_metrics(model, data_yaml_path, conf_threshold, img_size, use_half_precision):
+    """Evaluate metrics on positive population"""
+    print(f"\n Evaluating AP metrics on POSITIVE frames...")
+    
+    results_pos = model.val(
+        data=data_yaml_path, conf=conf_threshold, verbose=False, 
+        split="test", batch=1, device=0, imgsz=img_size, half=use_half_precision
+    )
+
+    ap50 = float(results_pos.box.ap50[0]) if len(results_pos.box.ap50) > 0 else 0.0
+    ap50_95 = float(results_pos.box.ap[0]) if len(results_pos.box.ap) > 0 else 0.0
+    p = float(results_pos.box.mp)
+    r = float(results_pos.box.mr)
+    f1 = 2 * (p * r) / (p + r + 1e-9)
+    inference_time_ms = results_pos.speed.get('inference', 0)
+
+    return ap50, ap50_95, p, r, f1, inference_time_ms
+
+def evaluate_negative_metrics(model, neg_images, test_images_dir, conf_threshold, img_size, use_half_precision):
+    """Evaluate metrics on negative population"""
+    if not neg_images:
+        print("\n No negative frames found in this test set. FP/frame = 0.0")
+        return 0.0 
+    print(f"\n Evaluating FP/frame on {len(neg_images)} NEGATIVE frames...")
+    neg_paths = [os.path.join(test_images_dir, img) for img in neg_images]
+    
+    total_fps = 0
+    results_neg = model.predict(
+        source=neg_paths, conf=conf_threshold, imgsz=img_size, 
+        half=use_half_precision, device=0, verbose=False, stream=True
+    )
+    
+    for res in results_neg:
+        total_fps += len(res.boxes)
+        
+    fp_per_frame = total_fps / len(neg_images)
+    print(f"    Total False Positives: {total_fps}")
+    print(f"    FP/frame: {fp_per_frame:.4f}")
+    
+    return fp_per_frame
 
 @hydra.main(version_base=None, config_path="configs", config_name="conf.yaml")
 def main(cfg: PolypDetectionConfig):
@@ -40,124 +99,159 @@ def main(cfg: PolypDetectionConfig):
         print("No runs found.")
         return
 
-    for i, run in enumerate(runs):
-        run_id = run.info.run_id
+    protocol = cfg.test.protocol
+    datasets_base_path = cfg.files.base_path
+    files_info = cfg.files.protocols[protocol]
+    test_images_dir = os.path.join(datasets_base_path, files_info.yolo_output_dir, "images", "test")
+    test_labels_dir = os.path.join(datasets_base_path, files_info.yolo_output_dir, "labels", "test")
 
-        client = mlflow.tracking.MlflowClient()
+    pos_images, neg_images = split_positive_negative_populations(test_images_dir, test_labels_dir)
+    print(f"Dataset split found: {len(pos_images)} Positives | {len(neg_images)} Negatives.")
 
-        parent_run = client.get_run(run_id)
-        model_tag = parent_run.data.tags.get("model", "YOLO_model_unknown")
-        seed_tag = parent_run.data.tags.get("seed", "seed_unknown")
+    with tempfile.TemporaryDirectory(dir=datasets_base_path) as shared_pos_dir:
+        pos_img_dir = os.path.join(shared_pos_dir, "images", "test")
+        pos_lbl_dir = os.path.join(shared_pos_dir, "labels", "test")
+        os.makedirs(pos_img_dir, exist_ok=True)
+        os.makedirs(pos_lbl_dir, exist_ok=True)
 
-        metric_val = run.data.metrics.get(cfg.test.metric, "N/A")
-        if metric_val == "N/A" or metric_val < 0.01:
-            print(f"\n[{i+1}/{len(runs)}] Skipping Run ID: {run_id} due to low metric value ({cfg.test.metric}: {metric_val})")
-            continue
+        for img in pos_images:
+            base_name = os.path.splitext(img)[0]
+            # os.symlink creates a symbolic link to the original file, so it doesn't consume additional disk space
+            os.symlink(os.path.join(test_images_dir, img), os.path.join(pos_img_dir, img))
+            os.symlink(os.path.join(test_labels_dir, base_name + ".txt"), os.path.join(pos_lbl_dir, base_name + ".txt"))
 
-        print(f"\n[{i+1}/{len(runs)}] Test for Run ID: {run_id} ({cfg.test.metric}: {metric_val})")
+        temp_yaml_path = os.path.join(shared_pos_dir, "data.yaml")
+        with open(temp_yaml_path, "w") as f:
+            f.write("train: images/test\nval: images/test\ntest: images/test\nnc: 1\nnames: ['polyp']\n")
 
-        weights_dir = mlflow.artifacts.download_artifacts(
-            run_id=run_id, artifact_path='weights'
-        )
-        weights_file = os.path.join(weights_dir, 'best.pt')
+        print("Shared positive dataset linked successfully (0 bytes used).")
 
-        deployment_dir = mlflow.artifacts.download_artifacts(
-        run_id=run_id, artifact_path='deployment_info'
-        )
-        deployment_file = os.path.join(deployment_dir, 'deployment_metadata.json')
+        for i, run in enumerate(runs):
+            run_id = run.info.run_id
 
-        with open(deployment_file, 'r') as f:
-            deployment_metadata = json.load(f)
-        
-        opt_conf = deployment_metadata["optimal_conf_threshold"]
-        protocol = cfg.test.protocol
-        datasets_base_path = cfg.files.base_path
-        files_info = cfg.files.protocols[protocol]
-        data_yaml = os.path.join(datasets_base_path, files_info.yolo_output_dir, "data.yaml")
+            client = mlflow.tracking.MlflowClient()
 
-        model = YOLO(weights_file)
-        model.info()
+            parent_run = client.get_run(run_id)
+            model_tag = parent_run.data.tags.get("model", "YOLO_model_unknown")
+            seed_tag = parent_run.data.tags.get("seed", "seed_unknown")
 
-        print("Running validation on test set...")
-        use_half_precision = cfg.test.precision_mode.upper() == "FP16"
-        print(f"Using half precision: {use_half_precision}")
-        print("Warming up GPU...")
-        # Usamos una imagen vacía o de ceros para no depender de archivos externos
-        # El tamaño debe ser el mismo que usarás en el test (cfg.test.img_size)
-        warmup_dummy = torch.zeros((1, 3, cfg.test.img_size, cfg.test.img_size)).to(0)
-        for _ in range(50):
-            _ = model.predict(warmup_dummy, verbose=False, half=use_half_precision)
-        print("Warmup completed. Starting evaluation...")
-        results = model.val(data=data_yaml, conf=opt_conf, verbose=False, split="test", batch=1, device=0, imgsz=cfg.test.img_size, half=use_half_precision)
+            metric_val = run.data.metrics.get(cfg.test.metric, "N/A")
+            if metric_val == "N/A" or metric_val < 0.01:
+                print(f"\n[{i+1}/{len(runs)}] Skipping Run ID: {run_id} due to low metric value ({cfg.test.metric}: {metric_val})")
+                continue
 
-        ap50 = float(results.box.ap50[0])
-        ap50_95 = float(results.box.ap[0])
-        p, r = float(results.box.mp), float(results.box.mr)
-        f1 = 2 * (p * r) / (p + r + 1e-9)
+            print(f"\n[{i+1}/{len(runs)}] Test for Run ID: {run_id} ({cfg.test.metric}: {metric_val})")
 
-        speed_dict = results.speed
-        inference_time_ms = speed_dict.get('inference', 0)
+            weights_dir = mlflow.artifacts.download_artifacts(
+                run_id=run_id, artifact_path='weights'
+            )
+            weights_file = os.path.join(weights_dir, 'best.pt')
 
-        precision_mode = cfg.test.precision_mode.upper()
-        metrics = {
-            'AP50': ap50,
-            'AP50_95': ap50_95,
-            'precision': p,
-            'recall': r,
-            'f1': f1,
-            'fps': 1000.0 / max(inference_time_ms, 0.1)
-        }
+            deployment_dir = mlflow.artifacts.download_artifacts(
+                run_id=run_id, artifact_path='deployment_info'
+            )
+            deployment_file = os.path.join(deployment_dir, 'deployment_metadata.json')
 
-        params = {
-            'precision_mode': precision_mode,
-            'imgsz': cfg.test.img_size,
-            'protocol': protocol,
-            'device': "server",
-            'model': model_tag,
-        }
+            print(f"Model weights downloaded to: {weights_file}")
+            print(f"Deployment metadata downloaded to: {deployment_file}")
 
-        tags = {
-            'model': model_tag,
-            'seed': seed_tag
-        }
-
-        run_name = f"LocalTest_{precision_mode}_{cfg.test.img_size}_{protocol}"
-
-        with mlflow.start_run(
-            experiment_id=experiment.experiment_id,
-            run_name=run_name,
-            parent_run_id =run_id
-        ):  
-            try:
-                mlflow.log_params(params)
-            except Exception as e:
-                print(f"Error logging parameters: {e}")
+            with open(deployment_file, 'r') as f:
+                deployment_metadata = json.load(f)
             
+            opt_conf = deployment_metadata["optimal_conf_threshold"]
+            model = YOLO(weights_file)
+            model.info()
+
+            print("Running validation on test set...")
+            use_half_precision = cfg.test.precision_mode.upper() == "FP16"
+            print(f"Using half precision: {use_half_precision}")
+            print("Warming up GPU...")
+            # Use a dummy input to warm up the GPU and load the model into memory before timing
+            warmup_dummy = torch.zeros((1, 3, cfg.test.img_size, cfg.test.img_size)).to(0)
+            for _ in range(50):
+                _ = model.predict(warmup_dummy, verbose=False, half=use_half_precision)
+            print("Warmup completed. Starting evaluation...")
+
+            if len(pos_images) > 0:
+                ap50, ap50_95, p, r, f1, inference_time_ms = evaluate_positive_metrics(
+                    model, temp_yaml_path, opt_conf, cfg.test.img_size, use_half_precision
+                )
+            else:
+                ap50, ap50_95, p, r, f1, inference_time_ms = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+
+            fp_per_frame = evaluate_negative_metrics(
+                model, neg_images, test_images_dir, opt_conf, cfg.test.img_size, use_half_precision
+            )
+
+            precision_mode = cfg.test.precision_mode.upper()
+            metrics = {
+                'AP50': ap50,
+                'AP50_95': ap50_95,
+                'precision': p,
+                'recall': r,
+                'f1': f1,
+                "FP_per_frame": fp_per_frame,
+                'fps': 1000.0 / max(inference_time_ms, 0.1)
+            }
+
+            params = {
+                'precision_mode': precision_mode,
+                'imgsz': cfg.test.img_size,
+                'protocol': protocol,
+                'device': "server",
+                'model': model_tag,
+            }
+
+            tags = {
+                'model': model_tag,
+                'seed': seed_tag
+            }
+
+            run_name = f"LocalTest_{precision_mode}_{cfg.test.img_size}_{protocol}"
+
+            with mlflow.start_run(
+                experiment_id=experiment.experiment_id,
+                run_name=run_name,
+                parent_run_id =run_id
+            ):  
+                try:
+                    mlflow.log_params(params)
+                except Exception as e:
+                    print(f"Error logging parameters: {e}")
+                
+                try:
+                    mlflow.set_tags(tags)
+                except Exception as e:
+                    print(f"Error logging tags: {e}")
+                mlflow.log_metrics(metrics)
+
+                
+                print(f"Logged successfully under nested run: {run_name}")
+
+            if precision_mode == "FP32" and cfg.test.img_size == 640:
+                    # save results to the parent run for easier comparison
+                with mlflow.start_run(run_id=run_id):
+                    mlflow.log_metrics({
+                        f'test_AP50_{protocol}': ap50,
+                        f'test_AP50_95_{protocol}': ap50_95,
+                        f'test_precision_{protocol}': p,
+                        f'test_recall_{protocol}': r,
+                        f'test_f1_{protocol}': f1,
+                        f'test_fps_{protocol}': 1000.0 / max(inference_time_ms, 0.1),
+                        f'test_FP_per_frame_{protocol}': fp_per_frame
+                    })
+                    print(f"Logged summary metrics to parent run {run_id} for easier comparison.")
+            torch.cuda.synchronize()
+            del model  # Clean up engine from GPU memory
+            gc.collect()
+            torch.cuda.empty_cache()
+
             try:
-                mlflow.set_tags(tags)
+                shutil.rmtree(weights_dir)
+                shutil.rmtree(deployment_dir)
+                print("Cleaned up temporary artifact directories.")
             except Exception as e:
-                print(f"Error logging tags: {e}")
-            mlflow.log_metrics(metrics)
-
-            
-            print(f"Logged successfully under nested run: {run_name}")
-
-        if precision_mode == "FP32" and cfg.test.img_size == 640:
-                # save results to the parent run for easier comparison
-            with mlflow.start_run(run_id=run_id):
-                mlflow.log_metrics({
-                    f'test_AP50_{protocol}': ap50,
-                    f'test_AP50_95_{protocol}': ap50_95,
-                    f'test_precision_{protocol}': p,
-                    f'test_recall_{protocol}': r,
-                    f'test_f1_{protocol}': f1,
-                    f'test_fps_{protocol}': 1000.0 / max(inference_time_ms, 0.1)
-                })
-                print(f"Logged summary metrics to parent run {run_id} for easier comparison.")
-        torch.cuda.synchronize()
-        del model  # Clean up engine from GPU memory
-        gc.collect()
-        torch.cuda.empty_cache()
+                print(f"Error during cleanup of temporary directories: {e}")
 
 if __name__ == "__main__":
     main()
