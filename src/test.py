@@ -33,9 +33,13 @@ def evaluate_positive_metrics(model, data_yaml_path, conf_threshold, img_size, u
     
     results_pos = model.val(
         data=data_yaml_path, conf=conf_threshold, verbose=False, 
-        split="test", batch=1, device=0, imgsz=img_size, half=use_half_precision
+        split="test", batch=1, device=0, imgsz=img_size, half=use_half_precision,
+        save_json=False, save=False
     )
-
+    print(results_pos.image_metrics)
+    df = results_pos.to_df()
+    print(df.columns)
+    print(df.head())
     ap50 = float(results_pos.box.ap50[0]) if len(results_pos.box.ap50) > 0 else 0.0
     ap50_95 = float(results_pos.box.ap[0]) if len(results_pos.box.ap) > 0 else 0.0
     p = float(results_pos.box.mp)
@@ -45,27 +49,17 @@ def evaluate_positive_metrics(model, data_yaml_path, conf_threshold, img_size, u
 
     return ap50, ap50_95, p, r, f1, inference_time_ms
 
-def evaluate_negative_metrics(model, neg_images, test_images_dir, conf_threshold, img_size, use_half_precision):
-    """Evaluate metrics on negative population"""
-    if not neg_images:
-        print("\n No negative frames found in this test set. FP/frame = 0.0")
-        return 0.0 
-    print(f"\n Evaluating FP/frame on {len(neg_images)} NEGATIVE frames...")
-    neg_paths = [os.path.join(test_images_dir, img) for img in neg_images]
-    
-    total_fps = 0
-    results_neg = model.predict(
-        source=neg_paths, conf=conf_threshold, imgsz=img_size, 
-        half=use_half_precision, device=0, verbose=False, stream=True
+def evaluate_negative_metrics(model, neg_yaml_path, n_neg_images, conf_threshold, img_size, use_half_precision):
+    if n_neg_images == 0:
+        return 0.0
+    print(f"\n Evaluating False Positives on NEGATIVE frames...")
+    results = model.val(
+        data=neg_yaml_path, conf=conf_threshold, verbose=False,
+        split="test", batch=32, device=0, imgsz=img_size, half=use_half_precision, save_json=False, save=False
     )
-    
-    for res in results_neg:
-        total_fps += len(res.boxes)
-        
-    fp_per_frame = total_fps / len(neg_images)
-    print(f"    Total False Positives: {total_fps}")
-    print(f"    FP/frame: {fp_per_frame:.4f}")
-    
+    total_fps = int(results.confusion_matrix.matrix[0, -1])
+    fp_per_frame = total_fps / n_neg_images
+    print(f"    Total FPs: {total_fps} | FP/frame: {fp_per_frame:.4f}")
     return fp_per_frame
 
 @hydra.main(version_base=None, config_path="configs", config_name="conf.yaml")
@@ -108,7 +102,8 @@ def main(cfg: PolypDetectionConfig):
     pos_images, neg_images = split_positive_negative_populations(test_images_dir, test_labels_dir)
     print(f"Dataset split found: {len(pos_images)} Positives | {len(neg_images)} Negatives.")
 
-    with tempfile.TemporaryDirectory(dir=datasets_base_path) as shared_pos_dir:
+    with tempfile.TemporaryDirectory(dir=datasets_base_path) as shared_pos_dir, \
+         tempfile.TemporaryDirectory(dir=datasets_base_path) as shared_neg_dir:
         pos_img_dir = os.path.join(shared_pos_dir, "images", "test")
         pos_lbl_dir = os.path.join(shared_pos_dir, "labels", "test")
         os.makedirs(pos_img_dir, exist_ok=True)
@@ -124,9 +119,24 @@ def main(cfg: PolypDetectionConfig):
         with open(temp_yaml_path, "w") as f:
             f.write("train: images/test\nval: images/test\ntest: images/test\nnc: 1\nnames: ['polyp']\n")
 
-        print("Shared positive dataset linked successfully (0 bytes used).")
+        neg_img_dir = os.path.join(shared_neg_dir, "images", "test")
+        neg_lbl_dir = os.path.join(shared_neg_dir, "labels", "test")
+        os.makedirs(neg_img_dir, exist_ok=True)
+        os.makedirs(neg_lbl_dir, exist_ok=True)
+        for img in neg_images:
+            base_name = os.path.splitext(img)[0]
+            os.symlink(os.path.join(test_images_dir, img), os.path.join(neg_img_dir, img))
+            open(os.path.join(neg_lbl_dir, base_name + ".txt"), "w").close()  # label vacío
+        neg_yaml_path = os.path.join(shared_neg_dir, "data.yaml")
+        with open(neg_yaml_path, "w") as f:
+            f.write("train: images/test\nval: images/test\ntest: images/test\nnc: 1\nnames: ['polyp']\n")
+
+        print("Shared positive dataset linked successfully.")
 
         for i, run in enumerate(runs):
+            if i < cfg.test.start_k:
+                print(f"\n[{i+1}/{len(runs)}] Skipping Run ID: {run.info.run_id} as it is below start_k ({cfg.test.start_k})")
+                continue
             run_id = run.info.run_id
 
             client = mlflow.tracking.MlflowClient()
@@ -180,7 +190,7 @@ def main(cfg: PolypDetectionConfig):
                 ap50, ap50_95, p, r, f1, inference_time_ms = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
 
             fp_per_frame = evaluate_negative_metrics(
-                model, neg_images, test_images_dir, opt_conf, cfg.test.img_size, use_half_precision
+                model, neg_yaml_path, len(neg_images), opt_conf, cfg.test.img_size, use_half_precision
             )
 
             precision_mode = cfg.test.precision_mode.upper()
