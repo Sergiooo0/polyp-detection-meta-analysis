@@ -47,7 +47,8 @@ class JetsonMonitor(threading.Thread):
             "avg_gpu_temp": 0,
             "max_cpu_temp": 0,
             "avg_cpu_temp": 0, 
-            "avg_ram": 0
+            "avg_ram": 0,
+            "max_ram": 0
         }
         return {
             "avg_power": sum(self.power_samples) / len(self.power_samples),
@@ -58,5 +59,6 @@ class JetsonMonitor(threading.Thread):
             "avg_gpu_temp": sum(self.gpu_temp_samples) / len(self.gpu_temp_samples),
             "max_cpu_temp": max(self.cpu_temp_samples),
             "avg_cpu_temp": sum(self.cpu_temp_samples) / len(self.cpu_temp_samples),
-            "avg_ram": sum(self.ram_util_samples) / len(self.ram_util_samples)
+            "avg_ram": sum(self.ram_util_samples) / len(self.ram_util_samples),
+            "max_ram": max(self.ram_util_samples)
         }
