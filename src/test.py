@@ -36,10 +36,6 @@ def evaluate_positive_metrics(model, data_yaml_path, conf_threshold, img_size, u
         split="test", batch=1, device=0, imgsz=img_size, half=use_half_precision,
         save_json=False, save=False
     )
-    print(results_pos.image_metrics)
-    df = results_pos.to_df()
-    print(df.columns)
-    print(df.head())
     ap50 = float(results_pos.box.ap50[0]) if len(results_pos.box.ap50) > 0 else 0.0
     ap50_95 = float(results_pos.box.ap[0]) if len(results_pos.box.ap) > 0 else 0.0
     p = float(results_pos.box.mp)

@@ -2,7 +2,6 @@ import hydra
 import mlflow
 from mlflow.tracking import MlflowClient
 from fabric import Connection
-from utils.get_config import get_config
 from config import PolypDetectionConfig
 
 @hydra.main(version_base=None, config_path="configs", config_name="conf.yaml")
