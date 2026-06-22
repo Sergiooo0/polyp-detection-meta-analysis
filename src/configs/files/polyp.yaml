@@ -1,7 +1,7 @@
 # Base configuration for polyp detection datasets
 
 # Base path for all datasets
-base_path: /path/to/yours/polyp_datasets
+base_path: /path/to/datasets
 
 # Dataset-specific configurations
 # Supported types:
@@ -14,11 +14,13 @@ raw_datasets:
     mask_dir: CVC-ClinicDB/PNG/GroundTruth
     metadata_file: CVC-ClinicDB/metadata.csv
     duplicate_threshold: 0.04
+    cache_dir: processed_datasets/clinic
   colon:
     type: mask
     images_dir: CVC-ColonDB/CVC-ColonDB/images
     mask_dir: CVC-ColonDB/CVC-ColonDB/masks
     duplicate_threshold: 0.04
+    cache_dir: processed_datasets/colon
   sun:
     type: sun_annotation
     positive_dir: sun/sundatabase_positive
@@ -26,16 +28,27 @@ raw_datasets:
     annotation_dir: sun/sundatabase_positive/annotation_txt
     metadata_file: sun/metadata.csv
     duplicate_threshold: 0.07
+    cache_dir: processed_datasets/sun
 
 # Definition of protocols for training and testing
 protocols:
   t1:
     description: "Train: Clinic | In-test: Clinic | OOD-test: Colon"
     train_source: clinic 
+    val_source: clinic
+    test_source: colon
+    train_ratio: 0.8
+    val_ratio: 0.2
+    test_ratio: 1.0
     ood_source: colon
     yolo_output_dir: YOLO_Experiments/T1
   t2:
-    description: "Train: SUN | In-test: SUN | OOD-test: Colon"
-    train_source: sun
-    ood_source: colon
+    description: "Train: Clinic | In-test: Clinic | OOD-test: SUN subset"
+    train_source: clinic
+    val_source: clinic
+    test_source: sun
+    train_ratio: 0.8
+    val_ratio: 0.2
+    test_ratio: 0.2
+    ood_source: sun
     yolo_output_dir: YOLO_Experiments/T2

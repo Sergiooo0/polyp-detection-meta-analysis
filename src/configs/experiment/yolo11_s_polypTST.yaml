@@ -1,0 +1,5 @@
+# @package _global_
+params:
+  model: "polyp_tst_yolo11s.yaml"
+  pretrained_weights: "yolo11s.pt"
+  model_name: 11sPolypTST

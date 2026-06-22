@@ -393,7 +393,7 @@ def main(cfg: PolypDetectionConfig):
             print(f"Error processing {dataset_name}: {str(e)}\n")
 
     protocol_outputs = build_protocols(cfg, dataset_results, base_path)
-    #transfer_to_jetson(protocol_outputs, cfg.connection)
+    transfer_to_jetson(protocol_outputs, cfg.connection)
     print("\nPreprocess pipeline completed successfully.")
 
 

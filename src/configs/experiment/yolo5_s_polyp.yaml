@@ -1,0 +1,5 @@
+# @package _global_
+params:
+  model: "polyp_yolo5.yaml"
+  pretrained_weights: "yolov5su.pt"
+  model_name: 5sPolyp

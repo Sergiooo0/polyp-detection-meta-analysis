@@ -21,7 +21,7 @@ multirun/
 
 # Environments and caches
 venv/
-.env/
+.env
 __pycache__/
 *.pyc
 

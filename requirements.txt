@@ -1,5 +1,5 @@
 hydra-core
 mlflow
-ultralytics
+ultralytics @ git+https://github.com/Sergiooo0/ultralytics.git
 hydra-optuna-sweeper optuna
-boto3 #required for mlflow-MinIO integration
+boto3 

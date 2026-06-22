@@ -1,0 +1,5 @@
+# @package _global_
+params:
+  model: "yolov5n.yaml"
+  pretrained_weights: "yolov5nu.pt"
+  model_name: 5n

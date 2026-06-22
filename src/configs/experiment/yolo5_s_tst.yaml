@@ -1,0 +1,5 @@
+# @package _global_
+params:
+  model: "tst_yolo5s.yaml"
+  pretrained_weights: "yolov5su.pt"
+  model_name: 5s_TST

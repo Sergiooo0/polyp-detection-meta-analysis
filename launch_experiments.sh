@@ -1,18 +1,19 @@
 #!/bin/bash
+SEEDS="42,55,66"
 
-# Configuration
-PROTOCOLS="t2.yaml"
-SEEDS="44,54,66"
-#EXPERIMENTS="yolo11_n_polyp.yaml,yolo11_n_polypTST.yaml,yolo11_n_tst.yaml,yolo11_n.yaml,yolo11_s_polyp.yaml,yolo11_s_polypTST.yaml,yolo11_s_tst.yaml,yolo11_s.yaml,yolo5_n_polyp.yaml,yolo5_n_tst.yaml,yolo5_n.yaml,yolo5_s_polyp.yaml,yolo5_s_tst.yaml,yolo5_s.yaml,yolo8_nano.yaml,yolo8_small.yaml"
-EXPERIMENTS="yolo11_n.yaml,yolo11_n_tst.yaml"
+#Collect all models .yaml files in the src/configs/experiments directory
+FOLDER="src/configs/experiments"
 
-echo "Starting Training Sweep..."
-# The -m flag triggers the Multirun
+files=()
+for file in "$FOLDER"/*.yaml; do
+    files+=("$(basename "$file")")
+done
+
+EXPERIMENTS=$(IFS=,; echo "${files[*]}")
+#Uncomment the following line to run only specific experiments
+#EXPERIMENTS="yolo11_n_tst.yaml,yolo11_n_polypTST.yaml,yolo11_s_polypTST.yaml,yolo11_s_tst.yaml,yolo5_n_tst.yaml,yolo5_s_tst.yaml"
+
 python src/train.py -m \
     experiment=$EXPERIMENTS \
-    protocol=$PROTOCOLS \
     params.seed=$SEEDS \
-    params.experiment_name=T2 \
-
-# params.weight_decay=0.001
-echo "All experiments completed!"
+    params.experiment_name=polyp_detection

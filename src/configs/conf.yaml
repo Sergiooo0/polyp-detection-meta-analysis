@@ -5,7 +5,6 @@ defaults:
   - connection: jetson
   - mlflow: mlflow
   - experiment: null
-  - protocol: null
 params:
   protocol: t1
   seed: 42
@@ -13,18 +12,18 @@ params:
   # If true, regenerates cached intermediates (e.g., SUN flat images/labels) even if they already exist.
   force_rebuild_cache: false
   # Route to the custom model YOLO yaml file or the name of a ultralystics model yaml.
-  model: null
-  pretrained_weights: yolo11n.pt
-  model_name: null
+  model: yolo11n.yaml
+  pretrained_weights: null
+  model_name: yolom
   img_size: 640
-  epochs: 200
+  epochs: 250
   experiment_name: polyp_detection
-  batch_size: 64
-  lr: 0.001
-  lrf: 0.1
+  batch_size: 32
+  lr: 0.0015
+  lrf: 0.3
   momentum: 0.937
   cos_lr: true
-  warmup_epochs: 3.0
+  warmup_epochs: 10.0
   patience: 100
   weight_decay: 0.0005
   optimizer: AdamW
@@ -32,12 +31,12 @@ params:
   # --- Data Augmentation ---
   hsv_s: 0.7
   hsv_v: 0.4
-  degrees: 10.0
+  degrees: 15.0
   translate: 0.1
   flipud: 0.5
   fliplr: 0.5
-  mosaic: 0.5
-  close_mosaic: 15
+  mosaic: 1.0
+  close_mosaic: 10
   scale: 0.5
   erasing: 0.0
   mixup: 0.0
@@ -49,7 +48,8 @@ params:
 test:
   top_k: 50
   metric: val_AP50_95
-  half_precision: false
-  experiment_name: T2
+  experiment_name: polyp_detection
   img_size: 640
-  precision_mode: FP32
+  precision_mode: FP16
+  start_k: 0
+  protocol: t1
